@@ -20,6 +20,7 @@ test('people helpers', () => {
   assert.strictEqual(s.displayName('a@x.com'), 'Ann');
   assert.strictEqual(s.displayName('zed@x.com'), 'zed');
   assert.strictEqual(s.partnerOf('a@x.com'), 'b@x.com');
+  assert.strictEqual(s.partnerOf('A@X.com'), 'b@x.com');
 });
 
 test('states map shape and save journals per row', () => {
@@ -53,6 +54,14 @@ test('ledger append, update, delete', () => {
   assert.strictEqual(s.readLedgerRows().length, 1);
   const ops = s.journal().map((e) => e.op);
   assert.deepStrictEqual(ops, ['append', 'update', 'delete']);
+});
+
+test('journal() returns a deep clone, not aliased internals', () => {
+  const s = createStore(snap());
+  s.appendLedger({ type: 'spend', amount: 1, balanceAfter: 0, actor: 'a@x.com', note: 'coffee' });
+  const entry = s.journal()[0];
+  entry.row.amount = 999;
+  assert.strictEqual(s.journal()[0].row.amount, 1);
 });
 
 test('settings, holidays, categories', () => {

@@ -41,7 +41,8 @@ export function createStore(snapshot) {
       return p ? p.name : String(email || '').split('@')[0];
     },
     partnerOf(email) {
-      const p = people.find((x) => x.email !== email);
+      const self = String(email || '').toLowerCase();
+      const p = people.find((x) => x.email !== self);
       return p ? p.email : null;
     },
 
@@ -111,6 +112,6 @@ export function createStore(snapshot) {
       return true;
     },
 
-    journal: () => journal.slice(),
+    journal: () => clone(journal),
   };
 }
