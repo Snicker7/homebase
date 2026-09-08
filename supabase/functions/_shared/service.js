@@ -848,7 +848,118 @@ export function createService(ctx) {
     });
   }
 
-  // ── dispatch and check-up links (Task 7) ──
+  // ── emails and check-up links (main.gs 1224-1363) ──
+  const money = (n) => '$' + Number(n).toFixed(2);
+
+  // Runs hourly. Sends reminders + check-ups for categories scheduled this hour,
+  // and performs freeze/bonus refresh when a category's period has rolled over.
+  // Weekly categories are gated to one reminder (Sun) + one check-up (Mon) —
+  // a mid-week check-up would record the still-open week.
+  async function dispatch() {
+    const hour = tzHourStr(ctx.now());
+    const dow = currentDow();
+    const cats = activeHabits();
+    // Each step is isolated: a throw anywhere in here used to swallow every
+    // remaining email for the hour, so one bad record meant a silent morning
+    // with nothing to show for it. Failures are collected and returned, so the
+    // mail still goes out AND the caller still sees the hour go red.
+    const failures = [];
+    const attempt = async (what, fn) => {
+      try { await fn(); } catch (e) { failures.push(what + ' — ' + ((e && e.message) || e)); }
+    };
+    await attempt('refresh/sweep', async () => {
+      cats.forEach(maybeRefresh);
+      let rows = null;
+      sweepChores(() => { if (rows === null) rows = store.readLedgerRows(); return rows; });
+    });
+    for (const cat of cats) {
+      if (cat.reminderTime && cat.reminderTime === hour && E.shouldSendReminder(cat, dow)) {
+        await attempt('reminder ' + cat.id, () => sendReminder(cat));
+      }
+      if (cat.checkupTime && cat.checkupTime === hour && E.shouldSendCheckup(cat, dow)) {
+        await attempt('check-up ' + cat.id, () => sendCheckup(cat));
+      }
+    }
+    // A pause silences the nags too — nobody needs "dishes on the line" emails
+    // from a beach chair.
+    if (!(chorePauseUntil() > todayStr())) {
+      for (const cat of activeChores()) {
+        if (cat.reminderTime && cat.reminderTime === hour) {
+          await attempt('chore reminder ' + cat.id, () => sendChoreReminder(cat));
+        }
+      }
+    }
+    return { ok: failures.length === 0, failures };
+  }
+
+  async function sendReminder(cat) {
+    for (const to of store.allowlist()) {
+      const s = catStateOf(to, cat.id, cat);
+      const potential = E.payout(cat, s.streak + 1);
+      const subject = (cat.emoji || '🔥') + ' ' + cat.name + ' — ' + money(potential) + ' on the line';
+      const heading = E.escapeHtml(cat.emoji || '🔥') + ' ' + E.escapeHtml(cat.name);
+      const html =
+        '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px">' +
+        '<h2>' + heading + '</h2>' +
+        '<p>Doing it earns <b>you</b> <b>' + money(potential) + '</b>.</p>' +
+        '<ul><li>Streak: <b>' + s.streak + '</b></li>' +
+        '<li>Freezes left: <b>' + E.freezesLeft(cat, s) + '</b></li></ul></div>';
+      await ctx.mail.send({ to, subject, html });
+    }
+  }
+
+  async function sendChoreReminder(cat) {
+    const rows = store.readLedgerRows();
+    const current = E.claimablePeriodKey(cat, todayStr());
+    if (E.isChoreClaimed(rows, cat.id, current)) return; // done — no nag
+    // Only the latest closed period can still be collected — a lost period's
+    // pot is gone, so advertising it would promise money nobody can claim.
+    const catchable = catchablePeriod(cat, choreStateOf(cat), todayStr());
+    let pot = 0;
+    E.outstandingChorePeriods(rows, cat.id).forEach(function (o) {
+      if (o.periodKey === catchable) pot = E.round2(pot + o.pot);
+    });
+    const to = cat.assignee ? [cat.assignee] : store.allowlist();
+    const subject = (cat.emoji || '🧹') + ' ' + cat.name + ' — ' + money(cat.value) + ' on the line';
+    const html =
+      '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px">' +
+      '<h2>' + E.escapeHtml(cat.emoji || '🧹') + ' ' + E.escapeHtml(cat.name) + '</h2>' +
+      '<p>Doing it pays <b>' + money(cat.value) + '</b>.' +
+      (pot > 0 ? ' A pot of <b>' + money(pot) + '</b> is waiting from missed ' + (cat.cadence === 'once' ? 'time' : 'periods') + '.' : '') +
+      (cat.dueDate ? '</p><p>Due by <b>' + E.escapeHtml(cat.dueDate) + '</b>.' : '') + '</p></div>';
+    for (const addr of to) await ctx.mail.send({ to: addr, subject, html });
+  }
+
+  async function sendCheckup(cat) {
+    // Ask about the period that just closed — the same one the dashboard buttons
+    // write, so a check-up answer and a dashboard tap can't land on different keys.
+    const periodKey = recordablePeriodKey(cat);
+    const btn = 'display:inline-block;padding:14px 22px;margin:6px 0;border-radius:10px;font-size:18px;text-decoration:none;color:#fff';
+    const rows = store.readLedgerRows();
+    const exp = ctx.now().getTime() + CHECKUP_TTL_MS;
+    for (const to of store.allowlist()) {
+      if (E.isPeriodRecorded(rows, to, cat.id, periodKey)) continue; // already recorded — no nag
+      const link = async (result) =>
+        ctx.dashboardUrl + '?t=' + encodeURIComponent(await signToken({ person: to, categoryId: cat.id, periodKey, result, exp }, ctx.secret));
+      const yesUrl = await link('on_time');
+      const noUrl = await link('missed');
+      const subject = 'Did you do ' + cat.name + '? ' + (cat.emoji || '');
+      const html =
+        '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px">' +
+        '<h2>' + E.escapeHtml(cat.emoji || '☀️') + ' ' + E.escapeHtml(cat.name) +
+        ' — ' + E.escapeHtml(periodKey) + '</h2>' +
+        '<p><a href="' + yesUrl + '" style="' + btn + ';background:#2e7d32">✅ Yes</a></p>' +
+        '<p><a href="' + noUrl + '" style="' + btn + ';background:#b00020">❌ No</a></p>' +
+        '<p style="color:#666;font-size:13px">If you miss and still have a freeze, it\'s used automatically.</p></div>';
+      await ctx.mail.send({ to, subject, html });
+    }
+  }
+
+  // The token carried the person, category, period and answer; the caller has
+  // already verified its signature and expiry.
+  function checkup(payload) {
+    return recordFor(payload.person, payload.categoryId, payload.periodKey, payload.result);
+  }
 
   function route(p) {
     switch (p.action) {
@@ -869,5 +980,5 @@ export function createService(ctx) {
     }
   }
 
-  return { route, recordFor };
+  return { route, recordFor, dispatch, checkup };
 }

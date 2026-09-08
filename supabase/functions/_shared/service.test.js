@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import { createService } from './service.js';
 import { makeCtx, ANN, BO, BEDTIME, DISHES } from './testkit.js';
+import { verifyToken } from './token.js';
 
 test('state: fresh store initializes states and returns dashboard shape', () => {
   const { ctx, store } = makeCtx();
@@ -224,4 +225,70 @@ test('deposit is gone', () => {
   const { ctx } = makeCtx();
   const r = createService(ctx).route({ action: 'deposit', user: ANN, amount: 5 });
   assert.deepStrictEqual(r, { ok: true, name: 'Homebase API' });
+});
+
+test('dispatch: sends reminder at reminder hour to both people', async () => {
+  // 21:00 Denver on Tue 2026-09-08 is 03:00Z Wed.
+  const { ctx, sent } = makeCtx({ nowIso: '2026-09-09T03:00:00Z' });
+  const r = await createService(ctx).dispatch();
+  assert.deepStrictEqual(r, { ok: true, failures: [] });
+  assert.strictEqual(sent.length, 2);
+  assert.deepStrictEqual(new Set(sent.map((m) => m.to)), new Set([ANN, BO]));
+  assert.match(sent[0].subject, /Bedtime — \$0\.25 on the line/);
+});
+
+test('dispatch: check-up carries signed yes/no links and skips recorded people', async () => {
+  // 09:00 Denver Tue 2026-09-08 is 15:00Z.
+  const { ctx, sent } = makeCtx({
+    nowIso: '2026-09-08T15:00:00Z',
+    ledger: [{ id: 'r1', timestamp: new Date(), type: 'entry', category: 'bedtime', periodKey: '2026-09-07', result: 'on_time', freezeUsed: false, amount: 0.25, balanceAfter: 0.25, actor: BO, note: '' }],
+  });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 1);
+  assert.strictEqual(sent[0].to, ANN);
+  const links = [...sent[0].html.matchAll(/href="([^"]+)"/g)].map((m) => m[1]);
+  assert.strictEqual(links.length, 2);
+  const url = new URL(links[0]);
+  assert.strictEqual(url.origin + url.pathname, 'https://homebase.samnichols.dev/');
+  const nowMs = new Date('2026-09-08T15:00:00Z').getTime();
+  const payload = await verifyToken(url.searchParams.get('t'), 'test-secret', nowMs);
+  assert.deepStrictEqual(payload, { person: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'on_time', exp: nowMs + 2 * 24 * 3600 * 1000 });
+});
+
+test('dispatch: settles a weekly rollover and pays the unused-freeze bonus', async () => {
+  // Monday 2026-09-14 17:00 Denver (23:00Z): the week of Sept 7 closes.
+  const { ctx, store } = makeCtx({
+    nowIso: '2026-09-14T23:00:00Z',
+    ledger: [{ id: 'r1', timestamp: new Date(), type: 'entry', category: 'bedtime', periodKey: '2026-09-09', result: 'on_time', freezeUsed: false, amount: 0.25, balanceAfter: 0.25, actor: ANN, note: '' }],
+    habitStates: [{ actor: ANN, category: 'bedtime', state: { streak: 1, periodStart: '2026-09-07', freezeRefresh: 'weekly', freezesUsedThisPeriod: 0, lastRecordedKey: '2026-09-09', since: '2026-08-31' } }],
+  });
+  await createService(ctx).dispatch();
+  const bonus = store.readLedgerRows().filter((r) => r.type === 'bonus');
+  assert.strictEqual(bonus.length, 1);
+  assert.strictEqual(bonus[0].actor, ANN);
+  assert.strictEqual(bonus[0].amount, 1);
+  assert.strictEqual(store.statesAll()[ANN].cats.bedtime.periodStart, '2026-09-14');
+});
+
+test('dispatch: a failing send is reported, other categories still go out', async () => {
+  const { ctx, sent } = makeCtx({ nowIso: '2026-09-09T03:00:00Z', categories: [BEDTIME, { ...BEDTIME, id: 'floss', name: 'Floss' }] });
+  let n = 0;
+  ctx.mail.send = async (m) => { if (n++ === 0) throw new Error('boom'); sent.push(m); };
+  const r = await createService(ctx).dispatch();
+  assert.strictEqual(r.ok, false);
+  assert.strictEqual(r.failures.length, 1);
+  assert.match(r.failures[0], /reminder bedtime — boom/);
+  // Bedtime's loop aborted on its first send; Floss still reached both people.
+  assert.strictEqual(sent.length, 2);
+  assert.ok(sent.every((m) => /Floss/.test(m.subject)));
+});
+
+test('checkup: records via a verified payload and reports already recorded', () => {
+  const { ctx } = makeCtx();
+  const svc = createService(ctx);
+  const payload = { person: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'on_time', exp: 9e15 };
+  const r = svc.checkup(payload);
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.event.amount, 0.25);
+  assert.match(svc.checkup(payload).error, /already recorded/);
 });
