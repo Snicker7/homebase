@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex, nofollow" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Habit Builder</title>
+    <link rel="stylesheet" href="css/style.css" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>" />
+  </head>
+  <body>
+    <main class="wrap">
+      <header class="topbar">
+        <h1>🌱 Habit Builder</h1>
+        <div class="who">
+          <span id="whoami" class="muted"></span>
+          <button id="manageBtn" class="link-btn" hidden>Categories</button>
+          <button id="logoutBtn" class="link-btn" hidden>Log out</button>
+        </div>
+      </header>
+
+      <!-- Global status / errors -->
+      <p id="banner" class="banner" hidden></p>
+
+      <!-- LOGIN -->
+      <section id="loginView" class="card" hidden>
+        <h2>Log in</h2>
+        <p class="muted">Enter your email and we'll send you a one-tap link.</p>
+        <form id="loginForm" class="row">
+          <input id="loginEmail" type="email" placeholder="you@example.com" required />
+          <button type="submit">Send link</button>
+        </form>
+        <p id="loginMsg" class="muted" hidden></p>
+      </section>
+
+      <!-- MORNING CHECK-IN (from email link) -->
+      <section id="checkinView" class="card accent" hidden>
+        <h2 id="checkinTitle">Last night</h2>
+        <p id="checkinBody" class="muted"></p>
+        <p id="checkinResult" class="result" hidden></p>
+        <button id="checkinDoneBtn" class="link-btn" hidden>Go to dashboard →</button>
+      </section>
+
+      <!-- DASHBOARD -->
+      <section id="dashView" hidden>
+        <div class="stats">
+          <div class="stat big">
+            <span class="label">Your wallet</span>
+            <span id="wallet" class="value">$0.00</span>
+          </div>
+        </div>
+
+        <div class="card partner" id="partnerCard" hidden>
+          <h2>👀 <span id="partnerName">Partner</span></h2>
+          <div class="prow">
+            <div><span class="label">Wallet</span><span id="partnerWallet" class="pval">$0.00</span></div>
+          </div>
+        </div>
+
+        <div id="catCards"></div>
+
+        <div id="choreCards"></div>
+
+        <div class="card">
+          <h2>Spend</h2>
+          <form id="spendForm" class="row">
+            <input id="spendAmount" type="number" min="0.01" step="0.01" placeholder="Amount" required />
+            <input id="spendNote" type="text" placeholder="What for?" />
+            <button type="submit">Spend</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Add money</h2>
+          <p class="muted">Adds the full amount to <b>both</b> wallets (mad money).</p>
+          <form id="addForm" class="row">
+            <input id="addAmount" type="number" min="0.01" step="0.01" placeholder="Amount" required />
+            <input id="addNote" type="text" placeholder="Note (optional)" />
+            <button type="submit">Add money</button>
+          </form>
+        </div>
+
+        <div class="card">
+          <h2>Recent activity</h2>
+          <table id="ledger" class="ledger">
+            <thead><tr><th>Date</th><th>Activity</th><th class="amt">Amount</th><th class="bal">Balance</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+          <p id="ledgerEmpty" class="muted" hidden>Nothing yet.</p>
+        </div>
+      </section>
+
+      <!-- ADMIN -->
+      <section id="adminView" class="card" hidden>
+        <div class="row" style="justify-content:space-between">
+          <h2>Categories</h2>
+          <button id="backToDashBtn" class="link-btn">← Dashboard</button>
+        </div>
+        <table id="catList" class="ledger">
+          <thead><tr><th>Name</th><th>Cadence</th><th></th></tr></thead>
+          <tbody></tbody>
+        </table>
+
+        <div class="row" style="justify-content:space-between;align-items:baseline">
+          <h3 id="catFormTitle" style="margin:0">Add a category</h3>
+          <button type="button" id="cancelEditBtn" class="link-btn" hidden>+ Add new instead</button>
+        </div>
+        <form id="catForm">
+          <input type="hidden" id="catId" />
+
+          <div class="field">
+            <label class="field-label" for="catName">Name</label>
+            <div class="inline-field name-field">
+              <input id="catEmoji" class="emoji" type="text" maxlength="16" placeholder="🌙" aria-label="Emoji (optional)" />
+              <input id="catName" class="grow" type="text" placeholder="Exercise, Chores, Sleep…" required />
+            </div>
+            <p class="hint">The emoji is optional — it heads the habit's card and its emails.</p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="catKind">Type</label>
+            <select id="catKind">
+              <option value="habit">Habit — you each build a streak</option>
+              <option value="chore">Chore — one of you does it, they get paid</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="catCadence">How often you record it</label>
+            <select id="catCadence">
+              <option value="daily">Every day</option>
+              <option value="weekly">Once a week</option>
+              <option value="monthly" class="chore-cadence" hidden>Once a month</option>
+              <option value="once" class="chore-cadence" hidden>One time</option>
+            </select>
+          </div>
+
+          <div id="habitFields">
+            <div class="grid2">
+              <div class="field">
+                <label class="field-label" for="catIncrement">Reward per streak step ($)</label>
+                <input id="catIncrement" type="number" step="0.01" min="0.01" inputmode="decimal" placeholder="0.25" required />
+              </div>
+              <div class="field">
+                <label class="field-label" for="catMax">Most you can earn at once ($)</label>
+                <input id="catMax" type="number" step="0.01" min="0.01" inputmode="decimal" placeholder="5.00" required />
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="catMinPayout">Minimum payout ($)</label>
+              <input id="catMinPayout" type="number" step="0.01" min="0" inputmode="decimal" placeholder="blank = start at the reward" />
+              <p class="hint">What a streak of 1 pays. Each further step adds the reward on top.</p>
+            </div>
+            <p class="hint">An on-time mark pays <b>minimum + reward × (streak − 1)</b>, up to the cap.</p>
+
+            <div class="field">
+              <label class="field-label">Freezes</label>
+              <div class="inline-field">
+                <input id="catFreezes" type="number" step="1" min="0" inputmode="numeric" value="1" required aria-label="Number of freezes" />
+                <span class="txt">per</span>
+                <select id="catRefresh" aria-label="Freeze refresh period">
+                  <option value="weekly">week</option>
+                  <option value="daily">day</option>
+                  <option value="monthly">month</option>
+                </select>
+              </div>
+              <p class="hint">A missed entry auto-uses a freeze to protect your streak. A daily task can still refresh its freezes weekly.</p>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="catBonus">Bonus for an unused freeze ($)</label>
+              <input id="catBonus" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0 = no bonus" />
+              <p class="hint">Paid at each freeze refresh if you didn't need a freeze.</p>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="catMissPenalty">Streak lost on a miss (%)</label>
+              <input id="catMissPenalty" type="number" step="1" min="0" max="100" inputmode="numeric" placeholder="100" />
+              <p class="hint">Applied only when no freeze is left. 100 wipes the streak, 50 halves it, 0 leaves it alone.</p>
+            </div>
+
+            <div class="field">
+              <label class="field-label" for="catCheckup">Check-up email</label>
+              <select id="catCheckup"></select>
+            </div>
+          </div>
+
+          <div id="choreFields" hidden>
+            <div class="grid2">
+              <div class="field">
+                <label class="field-label" for="catValue">Value per claim ($)</label>
+                <input id="catValue" type="number" step="0.01" min="0.01" inputmode="decimal" placeholder="2.00" />
+              </div>
+              <div class="field">
+                <label class="field-label" for="catAssignee">Who does it</label>
+                <select id="catAssignee"><option value="">Either of you</option></select>
+              </div>
+            </div>
+            <div class="field">
+              <label class="field-label" for="catDueDay">Due day (weekly chores)</label>
+              <select id="catDueDay">
+                <option value="">End of week (Sunday)</option>
+                <option value="mon">Monday</option>
+                <option value="tue">Tuesday</option>
+                <option value="wed">Wednesday</option>
+                <option value="thu">Thursday</option>
+                <option value="fri">Friday</option>
+                <option value="sat">Saturday</option>
+                <option value="sun">Sunday</option>
+              </select>
+              <p class="hint">The week's chore must be done by this day — after it, the value drains again each day (up to 5 days' worth). Once the next week comes due, the missed one is gone: you can't do it twice.</p>
+            </div>
+            <div class="field">
+              <label class="field-label" for="catDueDate">Due date (one-time chores)</label>
+              <input id="catDueDate" type="date" />
+              <p class="hint">Miss it and the value drains daily (up to 5 days' worth) — whoever finally does it collects the pot (shared chores only).</p>
+            </div>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="catNotes">Notes</label>
+            <textarea id="catNotes" rows="3" maxlength="2000" placeholder="Instructions, sub-tasks, anything worth remembering"></textarea>
+            <p class="hint">Shows on the card behind a 📝 Notes toggle.</p>
+          </div>
+
+          <div class="field">
+            <label class="field-label" for="catReminder">Reminder email</label>
+            <select id="catReminder"></select>
+          </div>
+          <p class="hint">Sent on the hour, in your timezone. Leave “off” to skip.</p>
+
+          <button type="submit">Save category</button>
+        </form>
+        <p id="catFormMsg" class="muted" hidden></p>
+      </section>
+
+      <footer class="foot muted">Build the habit, bank the reward 🌱</footer>
+    </main>
+
+    <script src="js/config.js"></script>
+    <script src="js/app.js"></script>
+  </body>
+</html>

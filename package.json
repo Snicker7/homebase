@@ -1,0 +1,11 @@
+{
+  "name": "homebase",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test supabase/functions/_shared/ scripts/"
+  },
+  "devDependencies": {
+    "postgres": "^3.4.5"
+  }
+}
