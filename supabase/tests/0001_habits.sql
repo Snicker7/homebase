@@ -1,5 +1,5 @@
 begin;
-select plan(10);
+select plan(11);
 
 select has_table('public', 'people', 'people exists');
 select has_table('public', 'categories', 'categories exists');
@@ -19,6 +19,11 @@ select ok(
 
 -- Only allowlisted emails may become auth users.
 insert into public.people (email, name) values ('ann@x.com', 'Ann');
+select lives_ok(
+  $$ insert into auth.users (id, email, instance_id, aud, role)
+     values (gen_random_uuid(), 'ann@x.com', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated') $$,
+  'allowlisted email is accepted'
+);
 select throws_ok(
   $$ insert into auth.users (id, email, instance_id, aud, role)
      values (gen_random_uuid(), 'stranger@x.com', '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated') $$,
