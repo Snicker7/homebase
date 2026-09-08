@@ -435,16 +435,439 @@ export function createService(ctx) {
     });
   }
 
-  // ── mutations (Task 6) ──
+  // ── mutations (main.gs 780-1226) ──
+
+  // Dashboard path: the SERVER decides which period is being recorded (the
+  // just-closed one, in TZ), so device clocks can't skew entries.
+  function doRecord(p) {
+    const person = requireUser(p);
+    const cat = categoryById(p.categoryId);
+    if (!cat) return { ok: false, error: 'unknown category' };
+    return recordEntry(person, cat, recordablePeriodKey(cat), p.result);
+  }
+  // Signed-link path: the token carried a server-issued period key.
+  function recordFor(person, categoryId, periodKey, result) {
+    const cat = categoryById(categoryId);
+    if (!cat) return { ok: false, error: 'unknown category' };
+    person = String(person || '').trim().toLowerCase();
+    if (store.allowlist().indexOf(person) === -1) return { ok: false, error: 'unknown person' };
+    return recordEntry(person, cat, String(periodKey), result);
+  }
+  function recordEntry(person, cat, periodKey, result) {
+    if (!isHabit(cat)) return { ok: false, error: 'chores are claimed, not answered — use its card on the dashboard' };
+    // Archiving stops the prompting and the emails; a link sent before it was
+    // archived must not still pay into the wallet.
+    if (!cat.active) return { ok: false, error: 'that habit is archived' };
+    if (result !== 'on_time' && result !== 'missed') {
+      return { ok: false, error: 'result must be "on_time" or "missed"' };
+    }
+    maybeRefresh(cat); // a miss must spend this period's freezes, not last one's
+    const rows = store.readLedgerRows(); // read after the refresh, so any bonus row is in it
+    // The ledger, not state's most-recent key, decides whether this period is
+    // already spoken for — otherwise an old signed check-up link credits a period
+    // that a later entry has already superseded.
+    if (E.isPeriodRecorded(rows, person, cat.id, periodKey)) {
+      return { ok: false, error: 'period ' + periodKey + ' already recorded' };
+    }
+    const entryFps = E.freezePeriodStart(cat.freezeRefresh, E.periodKeyDate(periodKey));
+    if (entryFps !== currentPeriodStart(cat)) {
+      // A late answer: its freeze period already rolled over, so the live path
+      // would spend the wrong period's freeze. Append and replay from this
+      // period instead — the same route an amend gap-fill takes.
+      const lateId = store.appendLedger({
+        type: 'entry', category: cat.id, periodKey: periodKey, result: result,
+        freezeUsed: false, amount: 0, balanceAfter: '', actor: person,
+        timestamp: ctx.now(),
+      });
+      const late = replayAndSave(person, cat, periodKey, lateId);
+      const le = late.entry || {};
+      return {
+        ok: true, user: person, wallet: late.wallet, cat: catPublic(person, cat),
+        event: { type: 'entry', category: cat.id, periodKey: periodKey, result: result,
+          freezeUsed: le.freezeUsed === true, amount: Number(le.amount) || 0 },
+      };
+    }
+    const s = catStateOf(person, cat.id, cat);
+    const out = E.applyEntry(s, E.deriveWallet(rows, person), cat, { periodKey: periodKey, result: result, actor: person });
+    store.appendLedger({ ...out.event, timestamp: ctx.now() });
+    saveCatState(person, cat.id, out.state);
+    return { ok: true, user: person, wallet: out.balance, cat: catPublic(person, cat), event: out.event };
+  }
+
+  function doSpend(p) {
+    const email = requireUser(p);
+    const out = E.applySpend(walletOf(email), { amount: Number(p.amount), note: p.note || '', actor: email });
+    store.appendLedger({ ...out.event, timestamp: ctx.now() });
+    return { ok: true, wallet: out.balance, event: out.event };
+  }
+
+  function doDeleteEntry(p) {
+    const email = requireUser(p);
+    const id = p.id;
+    if (!id) return { ok: false, error: 'missing id' };
+    const rows = store.readLedgerRows();
+    let match = null;
+    for (let i = 0; i < rows.length; i++) {
+      if (String(rows[i].id) === String(id)) { match = rows[i]; break; }
+    }
+    if (!match) return { ok: false, error: 'entry not found — reload and try again' };
+    if (String(match.actor).toLowerCase() !== String(email).toLowerCase()) {
+      return { ok: false, error: 'you can only remove your own entries' };
+    }
+    if (match.type === 'entry') {
+      const cat = categoryById(match.category);
+      if (!cat) return { ok: false, error: 'unknown category' };
+      // Settle any pending rollover first — replaying against a stale period
+      // start pays the closed week's bonus twice.
+      maybeRefresh(cat);
+      store.deleteLedgerRow(match.id);
+      // replayAndSave re-reads the ledger, so it sees the deletion.
+      const out = replayAndSave(email, cat, match.periodKey, null);
+      return { ok: true, wallet: out.wallet, cat: catPublic(email, cat) };
+    }
+    if (match.type === 'claim') {
+      const ccat = categoryById(match.category);
+      store.deleteLedgerRow(match.id);
+      // A once-chore was archived by its claim; taking the claim back reopens it.
+      if (ccat && !isHabit(ccat) && ccat.cadence === 'once') {
+        const clist = store.categoriesAll();
+        for (let ci = 0; ci < clist.length; ci++) if (clist[ci].id === ccat.id) clist[ci].active = true;
+        store.saveCategories(clist);
+      }
+      // No sweep state to rewind: both the accrual target and the catchable
+      // period are derived as "the latest closed period", so an un-claimed row
+      // resumes accruing on its own if it is still the latest — and stays lost
+      // if a later period has already come due.
+      return { ok: true, wallet: walletWithout(rows, email, match.id) };
+    }
+    if (match.type !== 'spend' && match.type !== 'deposit') {
+      return { ok: false, error: 'that row can\'t be removed here' };
+    }
+    store.deleteLedgerRow(match.id);
+    return { ok: true, wallet: walletWithout(rows, email, match.id) };
+  }
+  // The wallet as it stands once `id` is gone, computed from the rows we already
+  // read. Wallets stay derived from the ledger — never cached — so the only thing
+  // worth avoiding is reading the same ledger twice in one request.
+  function walletWithout(rows, email, id) {
+    return E.deriveWallet(rows.filter(function (r) { return String(r.id) !== String(id); }), email);
+  }
+
+  // Rewrite this actor's entry rows for `cat` from `fromPeriodKey` onward to the
+  // replayed history and store the replayed state. Rows for earlier periods keep
+  // the amounts they were paid: the streak walks all of history, but a rule
+  // changed since those rows were written must not cash itself in retroactively
+  // (see replayFrom). `excludeId` keeps the directly-changed row out of the
+  // ripple count shown to the user. The caller has already written its mutation.
+  function replayAndSave(email, cat, fromPeriodKey, excludeId) {
+    const rows = store.readLedgerRows(); // post-mutation
+    const mine = entryRowsFor(rows, email, cat.id);
+    const curStart = currentPeriodStart(cat);
+    const r = E.replayFrom(cat, mine, curStart, fromPeriodKey);
+    const corrected = {};
+    r.entries.forEach(function (e) { corrected[String(e.id)] = e; });
+    let changed = 0;
+    mine.forEach((row) => {
+      const e = corrected[String(row.id)];
+      if (!e) return; // before the edited period — never re-priced
+      if (E.isTrueFlag(row.freezeUsed) === e.freezeUsed && (Number(row.amount) || 0) === e.amount) return;
+      if (String(row.id) !== String(excludeId)) changed++;
+      row.freezeUsed = e.freezeUsed;
+      row.amount = e.amount;
+      store.updateLedgerRow(row.id, { freezeUsed: e.freezeUsed, amount: e.amount });
+    });
+    // balanceAfter is cosmetic (the app re-derives) but keep rows readable.
+    const a = String(email || '').toLowerCase();
+    const myAll = rows.filter((x) => String(x.actor || '').toLowerCase() === a);
+    const rb = E.runningBalanceRows(rows, email);
+    for (let i = 0; i < rb.length; i++) {
+      if (Number(myAll[i].balanceAfter) !== rb[i].balanceAfter) {
+        myAll[i].balanceAfter = rb[i].balanceAfter;
+        store.updateLedgerRow(myAll[i].id, { balanceAfter: rb[i].balanceAfter });
+      }
+    }
+    const wallet = rb.length ? rb[rb.length - 1].balanceAfter : 0;
+    // Unused-freeze bonuses are settled once, at the rollover that paid them, and
+    // an edit leaves them alone in both directions. Re-settling them let a
+    // back-filled answer mint a bonus for a period that had earned nothing.
+    const s = catStateOf(email, cat.id, cat);
+    saveCatState(email, cat.id, {
+      streak: r.state.streak,
+      periodStart: s.periodStart,
+      freezeRefresh: s.freezeRefresh,
+      freezesUsedThisPeriod: r.state.freezesUsedThisPeriod,
+      lastRecordedKey: r.state.lastRecordedKey,
+      since: s.since,
+    });
+    return {
+      wallet: wallet, changed: changed,
+      entry: excludeId != null ? corrected[String(excludeId)] || null : null,
+    };
+  }
+
+  // Change or back-fill the answer for any closed period. Dashboard only —
+  // signed email links stay single-purpose, and the same cap as doRecord's
+  // (nothing open or future) means amend can't inflate a streak any further
+  // than honest recording could.
+  function doAmend(p) {
+    const email = requireUser(p);
+    const result = p.result;
+    const periodKey = String(p.periodKey || '');
+    const cat = categoryById(p.categoryId);
+    if (!cat) return { ok: false, error: 'unknown category' };
+    if (!isHabit(cat)) return { ok: false, error: 'chores are claimed, not answered — use its card on the dashboard' };
+    if (!cat.active) return { ok: false, error: 'that habit is archived' };
+    if (result !== 'on_time' && result !== 'missed') {
+      return { ok: false, error: 'result must be "on_time" or "missed"' };
+    }
+    if (!E.validPeriodKey(cat.cadence, periodKey)) {
+      return { ok: false, error: cat.cadence === 'weekly'
+        ? 'pick a week like 2026-W33'
+        : 'pick a real date (YYYY-MM-DD)' };
+    }
+    const latest = recordablePeriodKey(cat);
+    if (E.periodKeyDate(periodKey) > E.periodKeyDate(latest)) {
+      return { ok: false, error: 'that ' + (cat.cadence === 'weekly' ? 'week' : 'day') +
+        ' isn\'t over yet — the latest you can record is ' + latest };
+    }
+    maybeRefresh(cat); // settle any pending rollover before touching history
+    const rows = store.readLedgerRows();
+    const before = entryRowsFor(rows, email, cat.id);
+    let target = null;
+    for (let i = 0; i < before.length; i++) {
+      if (String(before[i].periodKey) === periodKey) { target = before[i]; break; }
+    }
+    if (target && String(target.result) === result) {
+      return { ok: true, unchanged: true, wallet: E.deriveWallet(rows, email) };
+    }
+    let targetId;
+    if (target) {
+      store.updateLedgerRow(target.id, { result: result });
+      targetId = target.id;
+    } else {
+      targetId = store.appendLedger({
+        type: 'entry', category: cat.id, periodKey: periodKey, result: result,
+        freezeUsed: false, amount: 0, balanceAfter: '', actor: email,
+        timestamp: ctx.now(),
+      });
+    }
+    const out = replayAndSave(email, cat, periodKey, targetId);
+    const ae = out.entry || {};
+    return {
+      ok: true, wallet: out.wallet, cat: catPublic(email, cat),
+      event: { periodKey: periodKey, result: result,
+        freezeUsed: ae.freezeUsed === true, amount: Number(ae.amount) || 0 },
+      ripple: { entriesChanged: out.changed },
+    };
+  }
+
+  // Everything this person has recorded for one habit — the dashboard's 20-row
+  // ledger window is not enough for the past-date picker.
+  function doCatHistory(p) {
+    const email = requireUser(p);
+    const cat = categoryById(p.categoryId);
+    if (!cat) return { ok: false, error: 'unknown category' };
+    const mine = entryRowsFor(store.readLedgerRows(), email, cat.id);
+    mine.sort(function (a, b) {
+      const da = E.periodKeyDate(a.periodKey);
+      const db = E.periodKeyDate(b.periodKey);
+      return da < db ? 1 : da > db ? -1 : 0;
+    });
+    return {
+      ok: true,
+      entries: mine.map(function (r) {
+        return { periodKey: String(r.periodKey), result: r.result, freezeUsed: E.isTrueFlag(r.freezeUsed) };
+      }),
+    };
+  }
+
+  // "I did it" — claim the current period, or back-claim a penalized past one.
+  function doClaim(p) {
+    const email = requireUser(p);
+    const cat = categoryById(p.categoryId);
+    if (!cat) return { ok: false, error: 'unknown chore' };
+    if (isHabit(cat)) return { ok: false, error: 'that\'s a habit — record it with its ✅/❌ buttons' };
+    if (!cat.active) return { ok: false, error: 'that chore is archived' };
+    if (cat.assignee && cat.assignee !== email) {
+      return { ok: false, error: 'that chore is assigned to ' + store.displayName(cat.assignee) };
+    }
+    const s = choreStateOf(cat);
+    const current = E.claimablePeriodKey(cat, todayStr());
+    const periodKey = p.periodKey ? String(p.periodKey) : current;
+    if (!E.validPeriodKey(cat.cadence, periodKey)) {
+      return { ok: false, error: 'that isn\'t a valid period for this chore' };
+    }
+    if (periodKey > current) return { ok: false, error: 'that period hasn\'t started yet' };
+    if (cat.cadence !== 'once' && periodKey < s.since) {
+      return { ok: false, error: 'this chore only started being tracked in ' + s.since };
+    }
+    let rows = null;
+    const getRows = function () { if (rows === null) rows = store.readLedgerRows(); return rows; };
+    sweepChores(getRows); // a back-claim's pot must be settled before it pays out
+    // Only the open period and the one most recently closed can be claimed: once
+    // a chore comes due again, the period before it is gone for good.
+    if (periodKey !== current) {
+      const catchable = catchablePeriod(cat, choreStateOf(cat), todayStr());
+      if (periodKey !== catchable) {
+        return { ok: false, error: periodKey + ' is gone — it came due again before anyone did it' };
+      }
+    }
+    if (E.isChoreClaimed(getRows(), cat.id, periodKey)) {
+      return { ok: false, error: 'already done — ' + periodKey + ' is claimed' };
+    }
+    const pot = E.chorePotFor(getRows(), cat.id, periodKey);
+    const amount = E.chorePayout(cat, pot);
+    const wallet = E.round2(E.deriveWallet(getRows(), email) + amount);
+    store.appendLedger({
+      type: 'claim', category: cat.id, periodKey: periodKey,
+      amount: amount, actor: email, balanceAfter: wallet,
+      timestamp: ctx.now(),
+    });
+    if (cat.cadence === 'once') {
+      const list = store.categoriesAll();
+      for (let i = 0; i < list.length; i++) if (list[i].id === cat.id) list[i].active = false;
+      store.saveCategories(list); // done is done — the card disappears
+    }
+    return { ok: true, wallet: wallet, event: { periodKey: periodKey, amount: amount, pot: pot } };
+  }
+
+  function doListCategories(p) {
+    requireUser(p);
+    return {
+      ok: true, categories: store.categoriesAll(),
+      people: store.allowlist().map(function (e) { return { email: e, name: store.displayName(e) }; }),
+    };
+  }
+
+  function doSaveCategory(p) {
+    requireUser(p);
+    const raw = p.category ? (typeof p.category === 'string' ? JSON.parse(p.category) : p.category) : p;
+    const cat = E.normalizeCategory(raw);
+    const errs = E.validateCategory(cat);
+    if (errs.length) return { ok: false, error: errs.join(' ') };
+    // The pure engine can't see the allowlist, so this check belongs to the
+    // glue, not validateCategory.
+    if (!isHabit(cat) && cat.assignee && store.allowlist().indexOf(cat.assignee) === -1) {
+      return { ok: false, error: 'assignee must be one of the two of you' };
+    }
+    const list = store.categoriesAll();
+    let idx = -1;
+    for (let i = 0; i < list.length; i++) if (list[i].id === cat.id) idx = i;
+    const oldCadence = idx >= 0 ? list[idx].cadence : null;
+    if (idx >= 0) {
+      // Each kind's state machinery (streak state vs. choreStates) replays
+      // against the ledger under assumptions the other kind's rows would
+      // corrupt — a category's kind is fixed for its lifetime.
+      const oldKind = list[idx].kind === 'chore' ? 'chore' : 'habit';
+      const newKind = isHabit(cat) ? 'habit' : 'chore';
+      if (oldKind !== newKind) {
+        return { ok: false, error: 'a category can\'t change between habit and chore — archive it and create a new one' };
+      }
+      // The admin form carries only the fields it renders. Anything it omits
+      // keeps its stored value — otherwise every edit wiped the emoji and
+      // un-archived an archived category.
+      if (raw.emoji == null) cat.emoji = list[idx].emoji || '';
+      if (raw.notes == null) cat.notes = list[idx].notes || '';
+      if (raw.active == null) cat.active = list[idx].active !== false;
+      // A period that has already ended must be settled under the cadence that
+      // was in force when it ended. Without this the rebase below — which is
+      // right to refuse payment for an *edit* — also swallows the real rollover.
+      if (list[idx].active && cat.freezeRefresh !== list[idx].freezeRefresh) {
+        maybeRefresh(list[idx]);
+      }
+      list[idx] = cat;
+    } else {
+      list.push(cat);
+    }
+    store.saveCategories(list);
+    if (!isHabit(cat)) {
+      const cm = store.choreStatesAll();
+      if (oldCadence && oldCadence !== cat.cadence) {
+        // The stored `since` is a period key in the OLD cadence's format
+        // (e.g. a date vs. "YYYY-MM" vs. "YYYY-Www") — doClaim's lexicographic
+        // `periodKey < since` floor and stateResponse's outstanding filter both
+        // compare it against NEW-format keys, so preserving it silently
+        // mismatches (a daily->monthly edit bricks claiming all month; a
+        // daily->weekly edit disables the floor entirely). Restart both at the
+        // current period instead.
+        const cur = E.claimablePeriodKey(cat, todayStr());
+        cm[cat.id] = { since: cur, sweepFrom: cur, chargedThrough: todayStr() };
+        store.saveChoreStates(cm);
+      } else if (!cm[cat.id]) {
+        const cur2 = E.claimablePeriodKey(cat, todayStr());
+        cm[cat.id] = { since: cur2, sweepFrom: cur2, chargedThrough: todayStr() };
+        store.saveChoreStates(cm);
+      }
+    }
+    return { ok: true, categories: list };
+  }
+
+  function doArchiveCategory(p) {
+    requireUser(p);
+    const id = p.categoryId;
+    const list = store.categoriesAll();
+    for (let i = 0; i < list.length; i++) if (list[i].id === id) list[i].active = false;
+    store.saveCategories(list);
+    return { ok: true, categories: list };
+  }
+
+  function doUnarchiveCategory(p) {
+    requireUser(p);
+    const id = p.categoryId;
+    const list = store.categoriesAll();
+    let cat = null;
+    for (let i = 0; i < list.length; i++) {
+      if (list[i].id === id) { list[i].active = true; cat = list[i]; }
+    }
+    store.saveCategories(list);
+    // Archived categories are skipped by maybeRefresh, so the stored period start
+    // is however old the archive is. Left alone, the next refresh reads that gap
+    // as one period ending and pays an unused-freeze bonus for weeks the habit
+    // wasn't running. Resume in the current period instead, unpaid.
+    if (cat && isHabit(cat)) restartPeriod(cat);
+    if (cat && !isHabit(cat) && cat.cadence !== 'once') {
+      // The archived stretch owes nothing — resume sweeping at the current period.
+      const cm = store.choreStatesAll();
+      const s = cm[cat.id] || { since: E.claimablePeriodKey(cat, todayStr()) };
+      s.sweepFrom = E.claimablePeriodKey(cat, todayStr());
+      s.chargedThrough = todayStr(); // the daily clock skips the archived stretch too
+      cm[cat.id] = s;
+      store.saveChoreStates(cm);
+    }
+    return { ok: true, categories: list };
+  }
+
+  // Move everyone's state for this category into the current period without
+  // settling the previous one.
+  function restartPeriod(cat) {
+    const newStart = currentPeriodStart(cat);
+    store.allowlist().forEach(function (email) {
+      const s = catStateOf(email, cat.id, cat);
+      if (s.periodStart === newStart && s.freezeRefresh === cat.freezeRefresh) return;
+      saveCatState(email, cat.id, E.applyRestart(s, cat, newStart));
+    });
+  }
 
   // ── dispatch and check-up links (Task 7) ──
 
   function route(p) {
     switch (p.action) {
       case 'state': return stateResponse(requireUser(p));
+      case 'record': return doRecord(p);
+      case 'spend': return doSpend(p);
+      case 'deleteEntry': return doDeleteEntry(p);
+      case 'amend': return doAmend(p);
+      case 'catHistory': return doCatHistory(p);
+      case 'claim': return doClaim(p);
+      case 'pauseChores': return doPauseChores(p);
+      case 'resumeChores': return doResumeChores(p);
+      case 'listCategories': return doListCategories(p);
+      case 'saveCategory': return doSaveCategory(p);
+      case 'archiveCategory': return doArchiveCategory(p);
+      case 'unarchiveCategory': return doUnarchiveCategory(p);
       default: return { ok: true, name: 'Homebase API' };
     }
   }
 
-  return { route };
+  return { route, recordFor };
 }

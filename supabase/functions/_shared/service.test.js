@@ -60,3 +60,168 @@ test('state: an overdue chore accrues a penalty row for each person on load', ()
   assert.deepStrictEqual(new Set(penalties.map((r) => r.actor)), new Set([ANN, BO]));
   assert.ok(penalties.every((r) => r.amount < 0));
 });
+
+test('record: on_time pays and refuses a second answer for the same period', () => {
+  const { ctx, store } = makeCtx();
+  const svc = createService(ctx);
+  const r = svc.route({ action: 'record', user: ANN, categoryId: 'bedtime', result: 'on_time' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 0.25);
+  assert.strictEqual(r.cat.streak, 1);
+  assert.strictEqual(r.event.type, 'entry');
+  assert.strictEqual(r.event.periodKey, '2026-09-07');
+  const again = svc.route({ action: 'record', user: ANN, categoryId: 'bedtime', result: 'missed' });
+  assert.strictEqual(again.ok, false);
+  assert.match(again.error, /already recorded/);
+  assert.strictEqual(store.readLedgerRows().length, 1);
+  const j = store.journal();
+  assert.ok(j.some((e) => e.op === 'append'));
+  assert.ok(j.some((e) => e.op === 'habitState' && e.actor === ANN));
+});
+
+test('record: a miss with a freeze protects the streak and pays nothing', () => {
+  const { ctx } = makeCtx({
+    habitStates: [{ actor: ANN, category: 'bedtime', state: { streak: 3, periodStart: '2026-09-07', freezeRefresh: 'weekly', freezesUsedThisPeriod: 0, lastRecordedKey: '2026-09-06', since: '2026-08-31' } }],
+  });
+  const r = createService(ctx).route({ action: 'record', user: ANN, categoryId: 'bedtime', result: 'missed' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.event.freezeUsed, true);
+  assert.strictEqual(r.event.amount, 0);
+  assert.strictEqual(r.cat.streak, 3);
+  assert.strictEqual(r.cat.freezeAvailable, 0);
+});
+
+test('record: rejects chores, unknown, archived', () => {
+  const { ctx } = makeCtx({ categories: [BEDTIME, DISHES, { ...BEDTIME, id: 'old', active: false }] });
+  const svc = createService(ctx);
+  assert.match(svc.route({ action: 'record', user: ANN, categoryId: 'dishes', result: 'on_time' }).error, /claimed, not answered/);
+  assert.match(svc.route({ action: 'record', user: ANN, categoryId: 'nope', result: 'on_time' }).error, /unknown category/);
+  assert.match(svc.route({ action: 'record', user: ANN, categoryId: 'old', result: 'on_time' }).error, /archived/);
+});
+
+test('recordFor: the signed-link path records a server-issued period key', () => {
+  const { ctx } = makeCtx();
+  const svc = createService(ctx);
+  const r = svc.recordFor(ANN, 'bedtime', '2026-09-07', 'on_time');
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.user, ANN);
+  assert.strictEqual(r.event.amount, 0.25);
+  assert.match(svc.recordFor('stranger@x.com', 'bedtime', '2026-09-07', 'on_time').error, /unknown person/);
+});
+
+test('record: a late answer for a rolled-over period is appended and replayed', () => {
+  const { ctx, store } = makeCtx({
+    habitStates: [{ actor: ANN, category: 'bedtime', state: { streak: 0, periodStart: '2026-09-07', freezeRefresh: 'weekly', freezesUsedThisPeriod: 0, lastRecordedKey: null, since: '2026-08-31' } }],
+  });
+  const r = createService(ctx).recordFor(ANN, 'bedtime', '2026-09-05', 'on_time');
+  assert.strictEqual(r.ok, true);
+  const rows = store.readLedgerRows();
+  assert.strictEqual(rows.length, 1);
+  assert.strictEqual(rows[0].periodKey, '2026-09-05');
+  assert.strictEqual(rows[0].amount, 0.25);
+  assert.strictEqual(r.wallet, 0.25);
+});
+
+test('spend: debits the wallet and floors at zero', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 3, balanceAfter: 3, actor: ANN, note: '' }],
+  });
+  const svc = createService(ctx);
+  const r = svc.route({ action: 'spend', user: ANN, amount: 1.25, note: 'coffee' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 1.75);
+  assert.strictEqual(r.event.type, 'spend');
+  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 10 }).wallet, 0);
+});
+
+test('deleteEntry: removes own entry and replays; refuses partner rows', () => {
+  const { ctx, store } = makeCtx();
+  const svc = createService(ctx);
+  svc.route({ action: 'record', user: ANN, categoryId: 'bedtime', result: 'on_time' });
+  const id = store.readLedgerRows()[0].id;
+  assert.match(svc.route({ action: 'deleteEntry', user: BO, id }).error, /your own entries/);
+  const r = svc.route({ action: 'deleteEntry', user: ANN, id });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 0);
+  assert.strictEqual(r.cat.streak, 0);
+  assert.strictEqual(store.readLedgerRows().length, 0);
+  assert.ok(store.journal().some((e) => e.op === 'delete' && e.id === id));
+});
+
+test('amend: back-fills a closed day and ripples later amounts', () => {
+  const { ctx, store } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-08T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-09-07', result: 'on_time', freezeUsed: false, amount: 0.25, balanceAfter: 0.25, actor: ANN, note: '' }],
+    habitStates: [{ actor: ANN, category: 'bedtime', state: { streak: 1, periodStart: '2026-09-07', freezeRefresh: 'weekly', freezesUsedThisPeriod: 0, lastRecordedKey: '2026-09-07', since: '2026-08-31' } }],
+  });
+  const svc = createService(ctx);
+  const r = svc.route({ action: 'amend', user: ANN, categoryId: 'bedtime', periodKey: '2026-09-06', result: 'on_time' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.ripple.entriesChanged, 1); // Sept 7 is now streak 2 and re-priced
+  const rows = store.readLedgerRows().sort((a, b) => (a.periodKey < b.periodKey ? -1 : 1));
+  assert.strictEqual(rows[0].amount, 0.25);
+  assert.strictEqual(rows[1].amount, 0.5);
+  assert.strictEqual(r.wallet, 0.75);
+  assert.strictEqual(r.cat.streak, 2);
+  assert.match(svc.route({ action: 'amend', user: ANN, categoryId: 'bedtime', periodKey: '2026-09-08', result: 'on_time' }).error, /isn't over yet/);
+  assert.match(svc.route({ action: 'amend', user: ANN, categoryId: 'bedtime', periodKey: 'nope', result: 'on_time' }).error, /real date/);
+});
+
+test('catHistory: newest first', () => {
+  const { ctx } = makeCtx({
+    ledger: [
+      { id: 'a', timestamp: new Date(), type: 'entry', category: 'bedtime', periodKey: '2026-09-05', result: 'on_time', freezeUsed: false, amount: 0.25, balanceAfter: 0.25, actor: ANN, note: '' },
+      { id: 'b', timestamp: new Date(), type: 'entry', category: 'bedtime', periodKey: '2026-09-06', result: 'missed', freezeUsed: true, amount: 0, balanceAfter: 0.25, actor: ANN, note: '' },
+    ],
+  });
+  const r = createService(ctx).route({ action: 'catHistory', user: ANN, categoryId: 'bedtime' });
+  assert.deepStrictEqual(r.entries, [
+    { periodKey: '2026-09-06', result: 'missed', freezeUsed: true },
+    { periodKey: '2026-09-05', result: 'on_time', freezeUsed: false },
+  ]);
+});
+
+test('claim: pays the chore value and blocks a second claim', () => {
+  const { ctx } = makeCtx({ categories: [DISHES] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN }); // initializes chore state
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 2);
+  assert.strictEqual(r.event.periodKey, '2026-09-08');
+  assert.match(svc.route({ action: 'claim', user: BO, categoryId: 'dishes' }).error, /already done/);
+});
+
+test('pauseChores and resumeChores', () => {
+  const { ctx, store } = makeCtx({ categories: [DISHES] });
+  const svc = createService(ctx);
+  assert.match(svc.route({ action: 'pauseChores', user: ANN, until: '2026-09-01' }).error, /after today/);
+  const r = svc.route({ action: 'pauseChores', user: ANN, until: '2026-09-15' });
+  assert.deepStrictEqual(r, { ok: true, pauseUntil: '2026-09-15' });
+  assert.strictEqual(store.getSetting('chorePauseUntil'), '2026-09-15');
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).pauseUntil, '2026-09-15');
+  assert.deepStrictEqual(svc.route({ action: 'resumeChores', user: ANN }), { ok: true, pauseUntil: '' });
+  assert.strictEqual(store.getSetting('chorePauseUntil'), undefined);
+});
+
+test('category admin: save, archive, unarchive, kind is fixed', () => {
+  const { ctx, store } = makeCtx();
+  const svc = createService(ctx);
+  const list = svc.route({ action: 'listCategories', user: ANN });
+  assert.strictEqual(list.categories.length, 1);
+  assert.deepStrictEqual(list.people, [{ email: ANN, name: 'Ann' }, { email: BO, name: 'Bo' }]);
+  const saved = svc.route({ action: 'saveCategory', user: ANN, category: JSON.stringify({ name: 'Run', cadence: 'daily', rewardIncrement: 1, maxPerInstance: 5, freezesPerPeriod: 1 }) });
+  assert.strictEqual(saved.ok, true);
+  assert.strictEqual(saved.categories.length, 2);
+  assert.strictEqual(saved.categories[1].id, 'run');
+  assert.match(svc.route({ action: 'saveCategory', user: ANN, category: JSON.stringify({ id: 'run', kind: 'chore', name: 'Run', cadence: 'daily', value: 1 }) }).error, /can't change between habit and chore/);
+  assert.match(svc.route({ action: 'saveCategory', user: ANN, category: JSON.stringify({ kind: 'chore', name: 'Bins', cadence: 'weekly', value: 1, assignee: 'stranger@x.com' }) }).error, /one of the two of you/);
+  assert.strictEqual(svc.route({ action: 'archiveCategory', user: ANN, categoryId: 'run' }).categories[1].active, false);
+  assert.strictEqual(svc.route({ action: 'unarchiveCategory', user: ANN, categoryId: 'run' }).categories[1].active, true);
+  assert.ok(store.journal().some((e) => e.op === 'categories'));
+});
+
+test('deposit is gone', () => {
+  const { ctx } = makeCtx();
+  const r = createService(ctx).route({ action: 'deposit', user: ANN, amount: 5 });
+  assert.deepStrictEqual(r, { ok: true, name: 'Homebase API' });
+});
