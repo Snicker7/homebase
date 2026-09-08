@@ -62,6 +62,7 @@ test('journal() returns a deep clone, not aliased internals', () => {
   const entry = s.journal()[0];
   entry.row.amount = 999;
   assert.strictEqual(s.journal()[0].row.amount, 1);
+  assert.ok(s.journal()[0].row.timestamp instanceof Date);
 });
 
 test('settings, holidays, categories', () => {

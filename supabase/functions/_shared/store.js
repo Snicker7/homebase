@@ -112,6 +112,8 @@ export function createStore(snapshot) {
       return true;
     },
 
-    journal: () => clone(journal),
+    // structuredClone, not the JSON-based clone(), so a Date row.timestamp
+    // survives — pg.js hands it to the driver as-is.
+    journal: () => structuredClone(journal),
   };
 }
