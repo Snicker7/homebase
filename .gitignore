@@ -5,3 +5,4 @@ supabase/.temp/
 supabase/.branches/
 scripts/data/
 .superpowers/
+!.env.example
