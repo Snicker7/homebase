@@ -232,6 +232,12 @@ select {
     grid-template-columns: 1fr;
   }
 }
+/* Tablets and up get a wider column; the phone layout is the default. */
+@media (min-width: 700px) {
+  .wrap {
+    max-width: 680px;
+  }
+}
 /* sentence-shaped control, e.g. "Freezes [1] per [week]" */
 .inline-field {
   display: flex;

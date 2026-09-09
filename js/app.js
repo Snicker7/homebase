@@ -1,4 +1,5 @@
-'use strict';
+// ES module: the browser loads this with <script type="module">.
+import { api, checkup, requestLogin, getSession, signOut, onAuthChange, configured } from './api.js';
 
 /* ── tiny helpers ───────────────────────────────────────────────────────── */
 const $ = (id) => document.getElementById(id);
@@ -35,18 +36,10 @@ const weekKeyMonday = (weekKey) => {
   const dow = new Date(jan4 + 'T00:00:00Z').getUTCDay() || 7;
   return shiftDays(shiftDays(jan4, -(dow - 1)), (Number(m[2]) - 1) * 7);
 };
-const getToken = () => localStorage.getItem('ss_token') || '';
-const setToken = (t) => localStorage.setItem('ss_token', t);
-const clearToken = () => localStorage.removeItem('ss_token');
-const configured = () =>
-  window.CONFIG &&
-  CONFIG.WEB_APP_URL &&
-  CONFIG.WEB_APP_URL.indexOf('PASTE') === -1;
-
 // Shown when a category call returns ok but no categories array — the tell-tale
-// of the frontend talking to an old/wrong Apps Script deployment.
+// of the frontend talking to an old/wrong backend deployment.
 const STALE_BACKEND_MSG =
-  '⚠️ The backend didn\'t return category data — the app may be pointed at an old deployment. Check WEB_APP_URL in js/config.js and redeploy.';
+  '⚠️ The backend didn\'t return category data — the app may be pointed at an old deployment. Check SUPABASE_URL in js/config.js and redeploy.';
 
 // A second tap while a save is in flight double-records the period, or surfaces
 // the backend's raw "already recorded" error over a save that actually worked.
@@ -66,60 +59,14 @@ function banner(msg, isError) {
 function setView(name) {
   ['loginView', 'checkinView', 'dashView', 'adminView'].forEach((v) => ($(v).hidden = true));
   $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView' }[name]).hidden = false;
-  $('logoutBtn').hidden = !getToken();
+  $('logoutBtn').hidden = !SIGNED_IN;
 }
-
-/* ── JSONP client (avoids cross-origin/CORS issues with Apps Script) ──────── */
-let jsonpSeq = 0;
-function jsonp(params) {
-  return new Promise((resolve, reject) => {
-    if (!configured()) {
-      reject(new Error('Backend not configured (set WEB_APP_URL in js/config.js)'));
-      return;
-    }
-    const cb = 'ss_cb_' + ++jsonpSeq + '_' + Date.now();
-    const usp = new URLSearchParams();
-    Object.keys(params).forEach((k) => {
-      if (params[k] !== undefined && params[k] !== null && params[k] !== '') {
-        usp.set(k, params[k]);
-      }
-    });
-    usp.set('callback', cb);
-    const script = document.createElement('script');
-    let done = false;
-    const cleanup = () => {
-      delete window[cb];
-      script.remove();
-    };
-    const timer = setTimeout(() => {
-      if (!done) {
-        done = true;
-        cleanup();
-        reject(new Error('Network timeout — check your connection'));
-      }
-    }, 20000);
-    window[cb] = (data) => {
-      done = true;
-      clearTimeout(timer);
-      cleanup();
-      resolve(data);
-    };
-    script.onerror = () => {
-      if (!done) {
-        done = true;
-        clearTimeout(timer);
-        cleanup();
-        reject(new Error('Could not reach the backend'));
-      }
-    };
-    script.src = CONFIG.WEB_APP_URL + '?' + usp.toString();
-    document.body.appendChild(script);
-  });
-}
-const api = (action, extra) => jsonp(Object.assign({ action, token: getToken() }, extra || {}));
 
 // Last-rendered category list, so the admin form can guard against duplicate ids.
 let CAT_LIST = [];
+// Mirrors the Supabase session so setView can show/hide the logout button
+// without an await.
+let SIGNED_IN = false;
 
 /* ── rendering ──────────────────────────────────────────────────────────────*/
 function render(r) {
@@ -387,11 +334,18 @@ async function deleteEntry(id, type) {
 async function showDashboard(keepBanner) {
   setView('dash');
   if (!keepBanner) banner('', false);
+  // A dashboard that paints on the previous visit's data beats an empty card
+  // while the round-trip runs.
+  try {
+    const cached = JSON.parse(localStorage.getItem('hb_state') || 'null');
+    if (cached && !keepBanner) { render(cached); banner('Refreshing…', false); }
+  } catch { /* ignore */ }
   try {
     const r = await api('state');
     if (!r.ok) {
       if (/authoriz/i.test(r.error || '')) {
-        clearToken();
+        await signOut();
+        SIGNED_IN = false;
         setView('login');
         banner('Your session expired — please log in again.', true);
         return;
@@ -399,6 +353,9 @@ async function showDashboard(keepBanner) {
       banner(r.error || 'Could not load data', true);
       return;
     }
+    try { localStorage.setItem('hb_state', JSON.stringify(r)); } catch { /* ignore */ }
+    // Clears the cached path's "Refreshing…" once the fresh data is in hand.
+    if (!keepBanner) banner('', false);
     render(r);
     // The admin views already flag an old deployment; the dashboard used to show
     // a friendly "No categories yet" instead. An empty list is a real [] — only
@@ -537,24 +494,20 @@ function wireFixPast(card, c, label) {
     }));
 }
 
-async function checkinFlow(person, categoryId, periodKey, result, sig) {
+async function checkinFlow(t) {
   setView('checkin');
-  $('checkinTitle').textContent = 'Check-in: ' + periodKey;
-  $('checkinBody').textContent = result === 'on_time' ? 'Recording your on-time entry…' : 'Recording your missed entry…';
-  await recordViaSig(person, categoryId, periodKey, result, sig);
-}
-
-async function recordViaSig(person, categoryId, periodKey, result, sig) {
-  const params = { action: 'record', person, categoryId, periodKey, result, sig };
+  $('checkinTitle').textContent = 'Check-in';
+  $('checkinBody').textContent = 'Recording your answer…';
   $('checkinResult').hidden = false;
   $('checkinResult').textContent = 'Saving…';
   try {
-    const r = await jsonp(params);
+    const r = await checkup(t);
     const res = $('checkinResult');
     if (!r.ok) {
       res.textContent = /already recorded/i.test(r.error || '') ? '✅ Already recorded.' : '⚠️ ' + (r.error || 'Could not save');
     } else {
       const e = r.event;
+      $('checkinTitle').textContent = 'Check-in: ' + e.periodKey;
       if (e.result === 'on_time') res.textContent = '🎉 Recorded! Earned ' + money(e.amount) + '. Wallet: ' + money(r.wallet) + '.';
       else if (e.freezeUsed) res.textContent = '❄️ Freeze used — streak protected.';
       else res.textContent = 'Streak reset. Fresh start 💪 Wallet: ' + money(r.wallet) + '.';
@@ -679,7 +632,7 @@ function wire() {
     const email = $('loginEmail').value.trim();
     if (!email) return;
     try {
-      await jsonp({ action: 'requestLogin', email });
+      await requestLogin(email);
       $('loginMsg').hidden = false;
       $('loginMsg').textContent =
         'If that email is on the list, a login link is on its way. Check your inbox 📬';
@@ -688,8 +641,9 @@ function wire() {
     }
   });
 
-  $('logoutBtn').addEventListener('click', () => {
-    clearToken();
+  $('logoutBtn').addEventListener('click', async () => {
+    await signOut();
+    SIGNED_IN = false;
     setView('login');
     banner('Logged out.', false);
   });
@@ -713,22 +667,11 @@ function wire() {
     } catch (err) { banner(err.message, true); }
   });
 
-  $('addForm').addEventListener('submit', async (ev) => {
-    ev.preventDefault();
-    const amount = $('addAmount').value, note = $('addNote').value;
-    banner('Saving…', false);
-    try {
-      const r = await api('deposit', { amount, note });
-      if (!r.ok) { banner(r.error || 'Could not add', true); return; }
-      if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
-      $('addAmount').value = ''; $('addNote').value = '';
-      banner('Added ' + money(amount) + ' to both wallets.', false);
-      showDashboard(true);
-    } catch (err) { banner(err.message, true); }
-  });
-
-  $('checkinDoneBtn').addEventListener('click', () => {
-    if (getToken()) showDashboard();
+  // The check-in path returns from boot before it looks at the session, so ask
+  // for it here rather than trusting SIGNED_IN.
+  $('checkinDoneBtn').addEventListener('click', async () => {
+    SIGNED_IN = !!(await getSession());
+    if (SIGNED_IN) showDashboard();
     else setView('login');
   });
 
@@ -786,32 +729,31 @@ function wire() {
 }
 
 /* ── boot ───────────────────────────────────────────────────────────────────*/
-function boot() {
+async function boot() {
   wire();
   if (!configured()) {
-    banner('⚠️ Backend not set up yet — add your Apps Script URL to js/config.js.', true);
+    banner('⚠️ Backend not set up yet — add SUPABASE_URL and SUPABASE_ANON_KEY to js/config.js.', true);
   }
   const qp = new URLSearchParams(location.search);
-  const tokenParam = qp.get('token');
-  if (tokenParam) {
-    setToken(tokenParam);
+  const t = qp.get('t');
+  if (t) {
     history.replaceState({}, '', location.origin + location.pathname);
-  }
-  const periodKey = qp.get('periodKey');
-  const result = qp.get('result');
-  const sig = qp.get('sig');
-  const person = qp.get('person');
-  const categoryId = qp.get('categoryId');
-  if (person && categoryId && periodKey && result && sig) {
-    history.replaceState({}, '', location.origin + location.pathname);
-    checkinFlow(person, categoryId, periodKey, result, sig);
+    checkinFlow(t);
     return;
   }
-  if (getToken()) {
-    showDashboard();
-  } else {
-    setView('login');
-  }
+  // Supabase puts the magic-link session in the URL hash; the client
+  // consumes it and fires onAuthChange.
+  const session = await getSession();
+  SIGNED_IN = !!session;
+  // supabase-js consumes the hash during getSession() and leaves a bare '#'
+  // behind, so test the whole href rather than location.hash.
+  if (location.href.includes('#')) history.replaceState({}, '', location.origin + location.pathname);
+  if (SIGNED_IN) showDashboard(); else setView('login');
+  onAuthChange((s) => {
+    const was = SIGNED_IN;
+    SIGNED_IN = !!s;
+    if (SIGNED_IN && !was) showDashboard();
+  });
 }
 
 document.addEventListener('DOMContentLoaded', boot);
