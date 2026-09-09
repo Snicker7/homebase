@@ -54,17 +54,32 @@ function tzOffsetMs(date, timeZone) {
   return asUTC - date.getTime();
 }
 
+// ISO-ish "2026-06-20 21:05:11" (or with a "T" separator) and Sheets'
+// mangled "6/20/2026 21:05:11" — the same M/D/YYYY re-render `fixPeriodKey`
+// handles, but on a timestamp cell instead of a period-key cell.
+const ISO_STAMP_RE = /^(\d{4})-(\d{1,2})-(\d{1,2})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/;
+const US_STAMP_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{4})[ T](\d{1,2}):(\d{2})(?::(\d{2}))?/;
+
 function parseStamp(v) {
-  // "2026-06-20 21:05:11" is Denver local time in the Sheet; treat as such.
-  const m = /^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):?(\d{2})?/.exec(v || '');
-  if (m) {
-    // Build the UTC instant for that Denver wall-clock time.
-    const guess = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +(m[6] || 0)));
-    const offset = tzOffsetMs(guess, 'America/Denver');
-    return new Date(guess.getTime() - offset);
+  const s = String(v || '').trim();
+  let y, mo, d, h, mi, se;
+  let m = ISO_STAMP_RE.exec(s);
+  if (m) { [y, mo, d, h, mi, se] = [+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0)]; }
+  else {
+    m = US_STAMP_RE.exec(s);
+    if (m) { [mo, d, y, h, mi, se] = [+m[1], +m[2], +m[3], +m[4], +m[5], +(m[6] || 0)]; }
   }
-  const d = new Date(v);
-  return isNaN(d.getTime()) ? new Date(0) : d;
+  if (!m) throw new Error('unrecognised timestamp: ' + v);
+
+  // Build the UTC instant for that Denver wall-clock time. A single offset
+  // sample is wrong for wall-clock times on the day Denver's own DST
+  // transition falls, because the offset that applies AT the guessed UTC
+  // instant can differ from the offset that applies at the actual target
+  // instant; resample at the corrected instant to settle on the right one.
+  const guess = new Date(Date.UTC(y, mo - 1, d, h, mi, se));
+  const off1 = tzOffsetMs(guess, 'America/Denver');
+  const off2 = tzOffsetMs(new Date(guess.getTime() - off1), 'America/Denver');
+  return new Date(guess.getTime() - off2);
 }
 
 export function parseLedgerCsv(text) {
@@ -125,7 +140,22 @@ async function main() {
     await sql.begin(async (tx) => { await applyJournal(tx, journal); });
     const after = await loadSnapshot(sql);
     const store = createStore(after);
-    for (const a of actors) console.log(`db wallet ${a}: ${E.deriveWallet(store.readLedgerRows(), a).toFixed(2)}`);
+    const mismatches = [];
+    for (const a of actors) {
+      const csvWallet = E.deriveWallet(rows, a);
+      const dbWallet = E.deriveWallet(store.readLedgerRows(), a);
+      console.log(`db wallet ${a}: ${dbWallet.toFixed(2)}`);
+      if (dbWallet.toFixed(2) !== csvWallet.toFixed(2)) {
+        mismatches.push(`${a}: csv ${csvWallet.toFixed(2)} vs db ${dbWallet.toFixed(2)}`);
+      }
+    }
+    if (mismatches.length) {
+      // The transaction already committed — printing and re-running won't
+      // fix it. The caller has to wipe (local) or restore (production)
+      // before trying again.
+      console.error('wallet mismatch after apply — data already committed; run `npx supabase db reset` (local) or restore from backup (production) before retrying');
+      throw new Error('wallet mismatch after apply: ' + mismatches.join('; '));
+    }
     console.log('applied');
   } finally {
     await sql.end();
