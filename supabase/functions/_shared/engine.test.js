@@ -1061,3 +1061,41 @@ test('isoDow rejects what it cannot read instead of passing for Sunday', () => {
   assert.throws(() => E.isoDow(''), /YYYY-MM-DD/);
   assert.throws(() => E.freezePeriodStart('weekly', ''), /isoDow\(/);
 });
+
+/* ── fortnightly chores ────────────────────────────────────────────────── */
+const FORTNIGHT = { id: 'bins', kind: 'chore', name: 'Bins', cadence: 'biweekly', value: 4, assignee: '', dueDay: '', dueDate: '' };
+
+test('biweekly: a date keys to the ISO week its fortnight starts on', () => {
+  assert.strictEqual(E.periodKeyFor('biweekly', '2026-09-07'), '2026-W37');
+  assert.strictEqual(E.periodKeyFor('biweekly', '2026-09-20'), '2026-W37');
+  assert.strictEqual(E.periodKeyFor('biweekly', '2026-09-21'), '2026-W39');
+  // The grid keeps counting by 14 days across a 53-week year.
+  assert.strictEqual(E.periodKeyFor('biweekly', '2027-01-05'), '2026-W53');
+});
+
+test('biweekly: the next period is two weeks on', () => {
+  assert.strictEqual(E.nextChorePeriodKey('biweekly', '2026-W37'), '2026-W39');
+  assert.strictEqual(E.nextChorePeriodKey('biweekly', '2026-W53'), '2027-W02');
+});
+
+test('biweekly: only fortnight-start weeks are valid keys', () => {
+  assert.strictEqual(E.validPeriodKey('biweekly', '2026-W37'), true);
+  assert.strictEqual(E.validPeriodKey('biweekly', '2026-W38'), false);
+  assert.strictEqual(E.validPeriodKey('biweekly', '2026-09-07'), false);
+});
+
+test('biweekly: due on the second Sunday, or the due day of the second week', () => {
+  assert.strictEqual(E.choreDueDateFor(FORTNIGHT, '2026-W37'), '2026-09-20');
+  assert.strictEqual(E.choreDueDateFor(Object.assign({}, FORTNIGHT, { dueDay: 'wed' }), '2026-W37'), '2026-09-16');
+});
+
+test('biweekly: grouped as today on the due day, otherwise coming up', () => {
+  assert.strictEqual(E.choreGroup(FORTNIGHT, '2026-09-09', false), 'week');
+  assert.strictEqual(E.choreGroup(FORTNIGHT, '2026-09-20', false), 'today');
+});
+
+test('biweekly: normalize keeps the cadence and validate accepts a due day', () => {
+  const cat = E.normalizeCategory(Object.assign({}, FORTNIGHT, { dueDay: 'sat' }));
+  assert.strictEqual(cat.cadence, 'biweekly');
+  assert.deepStrictEqual(E.validateCategory(cat), []);
+});

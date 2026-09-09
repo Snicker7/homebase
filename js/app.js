@@ -91,6 +91,8 @@ function setView(name) {
 
 // Last-rendered category list, so the admin form can guard against duplicate ids.
 let CAT_LIST = [];
+// Named in the joint-claim banner.
+let PARTNER_NAME = 'your partner';
 // Mirrors the Supabase session so setView can show/hide the logout button
 // without an await.
 let SIGNED_IN = false;
@@ -102,7 +104,8 @@ function render(r) {
   $('manageBtn').hidden = false;
   renderPartner(r.partner);
   renderCatCards(r.cats || []);
-  renderChoreCards(r.chores || [], r.pauseUntil || '');
+  PARTNER_NAME = (r.partner && r.partner.name) || 'your partner';
+  renderChoreCards(r.chores || [], r.pauseUntil || '', r.user);
   renderLedger(r.ledger || []);
 }
 
@@ -259,9 +262,20 @@ function onRecordClick(card, c, result, label, btn) {
 }
 
 const DUE_DAY_NAMES = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+// The period a chore card is working in, in words: "today", "this week",
+// "Sep 7 – Sep 20", "September".
+function chorePeriodLabel(c) {
+  const key = String(c.claimablePeriodKey || '');
+  const md = (d) => { const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(d); return m ? MONTHS[+m[2] - 1] + ' ' + Number(m[3]) : d; };
+  if (c.cadence === 'daily') return 'today';
+  if (c.cadence === 'weekly') return 'this week';
+  if (c.cadence === 'biweekly') { const mon = weekKeyMonday(key); return md(mon) + ' – ' + md(shiftDays(mon, 13)); }
+  if (c.cadence === 'monthly') { const m = /^(\d{4})-(\d{2})$/.exec(key); return m ? MONTHS[+m[2] - 1] : key; }
+  return key;
+}
 
 
-function renderChoreCards(chores, pauseUntil) {
+function renderChoreCards(chores, pauseUntil, me) {
   const wrap = $('choreCards');
   wrap.innerHTML = '';
   if (chores.length || pauseUntil) renderChorePause(wrap, pauseUntil);
@@ -269,13 +283,13 @@ function renderChoreCards(chores, pauseUntil) {
   // collapses, and the do-whenever chores (monthly, undated one-timers) sink.
   const groups = { today: [], week: [], month: [] };
   chores.forEach((c) => { (groups[c.group] || groups.today).push(c); });
-  groups.today.forEach((c) => wrap.appendChild(choreCard(c)));
+  groups.today.forEach((c) => wrap.appendChild(choreCard(c, me)));
   if (groups.week.length) {
     const det = document.createElement('details');
     det.className = 'chore-week';
-    det.innerHTML = '<summary>📅 Later this week — ' + groups.week.length +
+    det.innerHTML = '<summary>📅 Coming up — ' + groups.week.length +
       ' chore' + (groups.week.length === 1 ? '' : 's') + '</summary>';
-    groups.week.forEach((c) => det.appendChild(choreCard(c)));
+    groups.week.forEach((c) => det.appendChild(choreCard(c, me)));
     wrap.appendChild(det);
   }
   if (groups.month.length) {
@@ -283,18 +297,20 @@ function renderChoreCards(chores, pauseUntil) {
     h.className = 'muted chore-group-label';
     h.textContent = '🗓️ Any day this month';
     wrap.appendChild(h);
-    groups.month.forEach((c) => wrap.appendChild(choreCard(c)));
+    groups.month.forEach((c) => wrap.appendChild(choreCard(c, me)));
   }
 }
 
-function choreCard(c) {
+function choreCard(c, me) {
   const label = (c.emoji ? c.emoji + ' ' : '') + c.name;
+  // The partner's chore is theirs to claim; this card only shows what it pays.
+  const mine = !c.assignee || String(c.assignee).toLowerCase() === String(me || '').toLowerCase();
   // The frontend ships before the backend (see README), so a card may arrive
   // from a deployment that predates these fields. Missing ones read as empty
   // rather than throwing and blanking every card on the page.
   const outstanding = Array.isArray(c.outstanding) ? c.outstanding : [];
-  const who = c.assignee ? esc(c.assigneeName) : 'either of you';
-  const cadence = { daily: 'Daily', weekly: 'Weekly', monthly: 'Monthly', once: 'One-time' }[c.cadence] || c.cadence;
+  const who = c.assignee ? esc(c.assigneeName) : 'Shared';
+  const cadence = { daily: 'Daily', weekly: 'Weekly', biweekly: 'Every two weeks', monthly: 'Monthly', once: 'One-time' }[c.cadence] || c.cadence;
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML =
@@ -306,42 +322,54 @@ function choreCard(c) {
     '</div>' +
     (c.claimedBy
       ? '<p class="chore-done">✓ ' + esc(c.claimedBy) + (c.cadence === 'daily' ? ', today' : '') + '</p>'
-      : '<div class="row" style="margin-top:8px"><button class="ok" data-claim>✋ I did it</button></div>') +
+      : mine
+        ? '<div class="actions" style="margin-top:8px"><button class="ok" data-claim>✋ I did it</button>' +
+          (c.assignee ? '' : '<button class="ok-ghost" data-claim-together>🤝 We did it</button>') + '</div>'
+        : '') +
     '<p class="muted">' + cadence +
-    (c.cadence === 'weekly' && c.dueDay ? ' • due ' + (DUE_DAY_NAMES[c.dueDay] || esc(c.dueDay)) : '') +
-    (c.cadence === 'once' ? '' : ' • this period: ' + esc(c.claimablePeriodKey)) + '</p>' +
+    ((c.cadence === 'weekly' || c.cadence === 'biweekly') && c.dueDay ? ' • due ' + (DUE_DAY_NAMES[c.dueDay] || esc(c.dueDay)) : '') +
+    (c.cadence === 'once' ? '' : ' • ' + esc(chorePeriodLabel(c))) + '</p>' +
     (c.notes
       ? '<details class="notes"><summary>📝 Notes</summary><p class="notes-text">' + esc(c.notes) + '</p></details>'
       : '') +
     // At most one period is ever catchable — older ones are gone for good.
-    (outstanding.length
+    (outstanding.length && mine
       ? '<details class="catch-up" open><summary>💰 Catch up — ' +
         money(outstanding[0].pot) + ' in the pot</summary>' +
         '<p class="muted catch-note">Last chance: this one is lost when ' +
         (c.cadence === 'once' ? 'it is archived' : 'the next one comes due') + '.</p>' +
         outstanding.map((o) =>
-          '<div class="row catch-row"><span class="muted">' + esc(o.periodKey) + '</span>' +
-          '<button class="ok" data-claim-past="' + esc(o.periodKey) + '">Claim ' +
-          money(c.assignee ? c.value : c.value + o.pot) + '</button></div>').join('') +
+          '<div class="row catch-row"><span class="muted">' + esc(periodLabel(o.periodKey)) + '</span>' +
+          '<span class="catch-btns"><button class="ok" data-claim-past="' + esc(o.periodKey) + '">Claim ' +
+          money(c.assignee ? c.value : c.value + o.pot) + '</button>' +
+          (c.assignee ? '' : '<button class="ok-ghost" data-claim-past-together="' + esc(o.periodKey) + '">Together</button>') +
+          '</span></div>').join('') +
         '</details>'
       : '');
-  const claim = async (periodKey) => {
+  const claim = async (periodKey, together, btn) => {
     if (inFlight) return;
-    setBusy(true);
-    banner('Saving…', false);
+    startWork(btn);
     try {
-      const r = await api('claim', periodKey ? { categoryId: c.id, periodKey } : { categoryId: c.id });
+      const body = { categoryId: c.id };
+      if (periodKey) body.periodKey = periodKey;
+      if (together) body.together = true;
+      const r = await api('claim', body);
       if (!r.ok) { banner(r.error || 'Could not claim', true); return; }
       if (typeof r.wallet === 'number') setWallet(r.wallet);
-      banner('🧹 ' + label + ' — +' + money(r.event.amount) +
-        (r.event.pot > 0 ? ' (includes the ' + money(r.event.pot) + ' pot)' : '') + '.', false);
+      const e = r.event;
+      banner('🧹 ' + label + (e.together
+        ? ', together — +' + money(e.amount) + ' for you, +' + money(e.partnerAmount) + ' for ' + PARTNER_NAME
+        : ' — +' + money(e.amount)) +
+        (e.pot > 0 ? ' (includes the ' + money(e.pot) + ' pot)' : '') + '.', false);
       await showDashboard(true);
-    } catch (err) { banner(err.message, true); } finally { setBusy(false); }
+    } catch (err) { banner(err.message, true); } finally { endWork(btn); }
   };
-  const btn = card.querySelector('button[data-claim]');
-  if (btn) btn.addEventListener('click', () => claim(null));
-  card.querySelectorAll('button[data-claim-past]').forEach((b) =>
-    b.addEventListener('click', () => claim(b.getAttribute('data-claim-past'))));
+  const wire = (sel, attr, together) => card.querySelectorAll(sel).forEach((b) =>
+    b.addEventListener('click', () => claim(attr ? b.getAttribute(attr) : null, together, b)));
+  wire('button[data-claim]', null, false);
+  wire('button[data-claim-together]', null, true);
+  wire('button[data-claim-past]', 'data-claim-past', false);
+  wire('button[data-claim-past-together]', 'data-claim-past-together', true);
   return card;
 }
 
@@ -672,7 +700,7 @@ function renderCatList(cats) {
     tr.innerHTML =
       '<td>' + (c.emoji ? esc(c.emoji) + ' ' : '') + esc(c.name) +
         (c.active ? '' : ' (archived)') + '</td>' +
-      '<td>' + esc(c.cadence) + '</td>' +
+      '<td>' + esc({ biweekly: 'every 2 weeks' }[c.cadence] || c.cadence) + '</td>' +
       '<td><button class="link-btn" data-edit="' + esc(c.id) + '">edit</button> ' +
       (c.active
         ? '<button class="link-btn" data-arch="' + esc(c.id) + '">archive</button>'
@@ -718,7 +746,9 @@ function applyKindToForm(kind) {
   $('habitFields').hidden = chore;
   $('choreFields').hidden = !chore;
   document.querySelectorAll('#catCadence option.chore-cadence').forEach((o) => { o.hidden = !chore; });
-  if (!chore && ($('catCadence').value === 'monthly' || $('catCadence').value === 'once')) {
+  // Chores are covered by the morning digest, not a per-chore reminder hour.
+  $('reminderField').hidden = chore;
+  if (!chore && ['biweekly', 'monthly', 'once'].includes($('catCadence').value)) {
     $('catCadence').value = 'daily';
   }
   document.querySelectorAll('#habitFields input').forEach((i) => { i.required = !chore && i.dataset.req === '1'; });
@@ -813,7 +843,7 @@ function wire() {
           cadence: $('catCadence').value, value: $('catValue').value,
           assignee: $('catAssignee').value, dueDate: $('catDueDate').value,
           dueDay: $('catDueDay').value, notes: $('catNotes').value,
-          reminderTime: $('catReminder').value,
+          reminderTime: '',
         }
       : {
           id: $('catId').value || undefined,

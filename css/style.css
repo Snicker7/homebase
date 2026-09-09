@@ -790,3 +790,25 @@ details.more[open] > summary::after {
     border-top-color: #fff;
   }
 }
+
+/* shared chores: solo claim beside the joint claim */
+button.ok-ghost {
+  flex: 1;
+  background: rgba(69, 201, 138, 0.12);
+  color: var(--ok);
+  border: 1px solid rgba(69, 201, 138, 0.45);
+}
+.catch-btns {
+  display: flex;
+  gap: 8px;
+}
+.catch-btns > button {
+  flex: 0 0 auto;
+  padding: 10px 14px;
+  min-height: 44px;
+}
+@media (prefers-color-scheme: light) {
+  button.ok-ghost {
+    color: #1f7a4d;
+  }
+}

@@ -118,6 +118,7 @@
             <select id="catCadence">
               <option value="daily">Every day</option>
               <option value="weekly">Once a week</option>
+              <option value="biweekly" class="chore-cadence" hidden>Every two weeks</option>
               <option value="monthly" class="chore-cadence" hidden>Once a month</option>
               <option value="once" class="chore-cadence" hidden>One time</option>
             </select>
@@ -185,7 +186,7 @@
               </div>
             </div>
             <div class="field">
-              <label class="field-label" for="catDueDay">Due day (weekly chores)</label>
+              <label class="field-label" for="catDueDay">Due day (weekly and fortnightly chores)</label>
               <select id="catDueDay">
                 <option value="">End of week (Sunday)</option>
                 <option value="mon">Monday</option>
@@ -211,11 +212,11 @@
             <p class="hint">Shows on the card behind a 📝 Notes toggle.</p>
           </div>
 
-          <div class="field">
+          <div class="field" id="reminderField">
             <label class="field-label" for="catReminder">Reminder email</label>
             <select id="catReminder"></select>
+            <p class="hint">Sent on the hour, in your timezone. Leave “off” to skip.</p>
           </div>
-          <p class="hint">Sent on the hour, in your timezone. Leave “off” to skip.</p>
 
           <button type="submit">Save category</button>
         </form>

@@ -3,6 +3,9 @@
 // synchronously against a journaled store; the caller owns the transaction.
 import * as E from './engine.js';
 import { WEEKLY_ROLLOVER_HOUR, CHECKUP_TTL_MS } from './config.js';
+
+// Denver wall-clock hour the chore digest goes out unless a setting overrides it.
+const DEFAULT_DIGEST_HOUR = '08:00';
 import { tzDate, tzHour, tzHourStr, tzMonthStart, tzStamp } from './clock.js';
 import { signToken } from './token.js';
 
@@ -353,6 +356,33 @@ export function createService(ctx) {
   function catPublic(email, cat) {
     return catPublicFromState(cat, catStateOf(email, cat.id, cat));
   }
+  // The dashboard card and the morning digest read a chore the same way.
+  function choreView(c, rows) {
+    const st = choreStateOf(c);
+    const current = E.claimablePeriodKey(c, todayStr());
+    // A joint claim leaves one row per person; name them in allowlist order.
+    const claimants = store.allowlist().filter(function (who) {
+      return rows.some(function (r0) {
+        return r0.type === 'claim' && String(r0.category) === c.id &&
+          String(r0.periodKey) === current && String(r0.actor || '').toLowerCase() === who;
+      });
+    });
+    const claimant = claimants.length ? claimants.map(store.displayName).join(' & ') : null;
+    // Only the latest closed period is still catchable — lost ones drop off
+    // the card rather than sitting there as an uncollectable pot.
+    const catchable = catchablePeriod(c, st, todayStr());
+    const outstanding = E.outstandingChorePeriods(rows, c.id).filter(function (o) {
+      return o.periodKey === catchable && (c.cadence === 'once' || o.periodKey >= st.since);
+    });
+    return {
+      id: c.id, name: c.name, emoji: c.emoji, kind: 'chore', cadence: c.cadence,
+      value: c.value, assignee: c.assignee, assigneeName: c.assignee ? store.displayName(c.assignee) : '',
+      dueDate: c.dueDate || '', dueDay: c.dueDay || '', notes: c.notes || '',
+      claimablePeriodKey: current,
+      claimedBy: claimant, outstanding: outstanding,
+      group: E.choreGroup(c, todayStr(), outstanding.length > 0),
+    };
+  }
   function stateResponse(email) {
     const active = activeHabits();
     // Freezes refresh at each category's period rollover. The hourly dispatch is
@@ -372,31 +402,7 @@ export function createService(ctx) {
     const cats = active.map(function (c) {
       return catPublicFromState(c, myState[c.id] || E.initialCatState(c, currentPeriodStart(c)), myRows);
     });
-    const chores = activeChores().map(function (c) {
-      const st = choreStateOf(c);
-      const current = E.claimablePeriodKey(c, todayStr());
-      let claimant = null;
-      for (let i = 0; i < rows.length; i++) {
-        const r0 = rows[i];
-        if (r0.type === 'claim' && String(r0.category) === c.id && String(r0.periodKey) === current) {
-          claimant = store.displayName(String(r0.actor || '').toLowerCase());
-        }
-      }
-      // Only the latest closed period is still catchable — lost ones drop off
-      // the card rather than sitting there as an uncollectable pot.
-      const catchable = catchablePeriod(c, st, todayStr());
-      const outstanding = E.outstandingChorePeriods(rows, c.id).filter(function (o) {
-        return o.periodKey === catchable && (c.cadence === 'once' || o.periodKey >= st.since);
-      });
-      return {
-        id: c.id, name: c.name, emoji: c.emoji, kind: 'chore', cadence: c.cadence,
-        value: c.value, assignee: c.assignee, assigneeName: c.assignee ? store.displayName(c.assignee) : '',
-        dueDate: c.dueDate || '', dueDay: c.dueDay || '', notes: c.notes || '',
-        claimablePeriodKey: current,
-        claimedBy: claimant, outstanding: outstanding,
-        group: E.choreGroup(c, todayStr(), outstanding.length > 0),
-      };
-    });
+    const chores = activeChores().map(function (c) { return choreView(c, rows); });
     const resp = {
       ok: true, user: email, name: store.displayName(email),
       pauseUntil: chorePauseUntil(),
@@ -691,6 +697,13 @@ export function createService(ctx) {
     if (cat.assignee && cat.assignee !== email) {
       return { ok: false, error: 'that chore is assigned to ' + store.displayName(cat.assignee) };
     }
+    // "We did it": both of you split the payout, so only a shared chore qualifies.
+    const together = p.together === true || p.together === 'true';
+    if (together && cat.assignee) {
+      return { ok: false, error: 'that chore is assigned to ' + store.displayName(cat.assignee) + ' — claim it alone' };
+    }
+    const partner = together ? store.partnerOf(email) : null;
+    if (together && !partner) return { ok: false, error: 'nobody to share it with' };
     const s = choreStateOf(cat);
     const current = E.claimablePeriodKey(cat, todayStr());
     const periodKey = p.periodKey ? String(p.periodKey) : current;
@@ -716,19 +729,33 @@ export function createService(ctx) {
       return { ok: false, error: 'already done — ' + periodKey + ' is claimed' };
     }
     const pot = E.chorePotFor(getRows(), cat.id, periodKey);
-    const amount = E.chorePayout(cat, pot);
+    const total = E.chorePayout(cat, pot);
+    // The partner's half rounds down to the cent; the tapper keeps the remainder.
+    const partnerAmount = together ? Math.floor(Math.round(total * 100) / 2) / 100 : 0;
+    const amount = E.round2(total - partnerAmount);
     const wallet = E.round2(E.deriveWallet(getRows(), email) + amount);
     store.appendLedger({
       type: 'claim', category: cat.id, periodKey: periodKey,
       amount: amount, actor: email, balanceAfter: wallet,
       timestamp: ctx.now(),
     });
+    if (together) {
+      store.appendLedger({
+        type: 'claim', category: cat.id, periodKey: periodKey,
+        amount: partnerAmount, actor: partner,
+        balanceAfter: E.round2(E.deriveWallet(getRows(), partner) + partnerAmount),
+        timestamp: ctx.now(),
+      });
+    }
     if (cat.cadence === 'once') {
       const list = store.categoriesAll();
       for (let i = 0; i < list.length; i++) if (list[i].id === cat.id) list[i].active = false;
       store.saveCategories(list); // done is done — the card disappears
     }
-    return { ok: true, wallet: wallet, event: { periodKey: periodKey, amount: amount, pot: pot } };
+    return {
+      ok: true, wallet: wallet,
+      event: { periodKey: periodKey, amount: amount, pot: pot, together: together, partnerAmount: partnerAmount },
+    };
   }
 
   function doListCategories(p) {
@@ -880,14 +907,11 @@ export function createService(ctx) {
         await attempt('check-up ' + cat.id, () => sendCheckup(cat));
       }
     }
-    // A pause silences the nags too — nobody needs "dishes on the line" emails
-    // from a beach chair.
-    if (!(chorePauseUntil() > todayStr())) {
-      for (const cat of activeChores()) {
-        if (cat.reminderTime && cat.reminderTime === hour) {
-          await attempt('chore reminder ' + cat.id, () => sendChoreReminder(cat));
-        }
-      }
+    // One morning digest per person replaces per-chore nags. A pause silences
+    // it too — nobody needs "dishes on the line" from a beach chair.
+    const digestHour = store.getSetting('choreDigestTime') || DEFAULT_DIGEST_HOUR;
+    if (hour === digestHour && !(chorePauseUntil() > todayStr())) {
+      await attempt('chore digest', () => sendChoreDigest());
     }
     return { ok: failures.length === 0, failures };
   }
@@ -908,26 +932,30 @@ export function createService(ctx) {
     }
   }
 
-  async function sendChoreReminder(cat) {
+  // Everything due today for one person: their own chores plus the shared
+  // ones, minus anything already claimed. Nothing due, no email.
+  async function sendChoreDigest() {
     const rows = store.readLedgerRows();
-    const current = E.claimablePeriodKey(cat, todayStr());
-    if (E.isChoreClaimed(rows, cat.id, current)) return; // done — no nag
-    // Only the latest closed period can still be collected — a lost period's
-    // pot is gone, so advertising it would promise money nobody can claim.
-    const catchable = catchablePeriod(cat, choreStateOf(cat), todayStr());
-    let pot = 0;
-    E.outstandingChorePeriods(rows, cat.id).forEach(function (o) {
-      if (o.periodKey === catchable) pot = E.round2(pot + o.pot);
-    });
-    const to = cat.assignee ? [cat.assignee] : store.allowlist();
-    const subject = (cat.emoji || '🧹') + ' ' + cat.name + ' — ' + money(cat.value) + ' on the line';
-    const html =
-      '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px">' +
-      '<h2>' + E.escapeHtml(cat.emoji || '🧹') + ' ' + E.escapeHtml(cat.name) + '</h2>' +
-      '<p>Doing it pays <b>' + money(cat.value) + '</b>.' +
-      (pot > 0 ? ' A pot of <b>' + money(pot) + '</b> is waiting from missed ' + (cat.cadence === 'once' ? 'time' : 'periods') + '.' : '') +
-      (cat.dueDate ? '</p><p>Due by <b>' + E.escapeHtml(cat.dueDate) + '</b>.' : '') + '</p></div>';
-    for (const addr of to) await ctx.mail.send({ to: addr, subject, html });
+    const views = activeChores().map(function (c) { return choreView(c, rows); })
+      .filter(function (v) { return v.group === 'today' && !v.claimedBy; });
+    for (const to of store.allowlist()) {
+      const mine = views.filter(function (v) { return !v.assignee || v.assignee === to; });
+      if (!mine.length) continue;
+      const names = mine.map(function (v) { return v.name; }).join(', ');
+      const items = mine.map(function (v) {
+        const pot = v.outstanding.reduce(function (sum, o) { return E.round2(sum + o.pot); }, 0);
+        return '<li><b>' + E.escapeHtml(v.emoji || '🧹') + ' ' + E.escapeHtml(v.name) + '</b> — ' + money(v.value) +
+          (v.assignee ? '' : ' (shared)') +
+          (pot > 0 ? '. A pot of <b>' + money(pot) + '</b> is waiting from missed ' + (v.cadence === 'once' ? 'time' : 'periods') : '') +
+          (v.dueDate ? '. Due by ' + E.escapeHtml(v.dueDate) : '') + '</li>';
+      }).join('');
+      const subject = '🧹 Chores today: ' + names;
+      const html =
+        '<div style="font-family:system-ui,Arial,sans-serif;max-width:480px">' +
+        '<h2>Today\'s chores</h2><ul>' + items + '</ul>' +
+        '<p><a href="' + ctx.dashboardUrl + '">Open the dashboard</a> to claim one when it\'s done.</p></div>';
+      await ctx.mail.send({ to, subject, html });
+    }
   }
 
   async function sendCheckup(cat) {

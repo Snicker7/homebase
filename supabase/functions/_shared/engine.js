@@ -34,9 +34,19 @@ function isoWeek(dateStr) {
   return d.getUTCFullYear() + '-W' + ('0' + weekNo).slice(-2);
 }
 
+// Fortnights sit on a fixed grid counted from the Monday of ISO week 1 of
+// 2026, so both people see the same period with nothing to configure.
+var FORTNIGHT_EPOCH = '2025-12-29';
+function fortnightStart(dateStr) {
+  var monday = mondayOf(dateStr, isoDow(dateStr));
+  var weeks = Math.round((Date.parse(monday + 'T00:00:00Z') - Date.parse(FORTNIGHT_EPOCH + 'T00:00:00Z')) / (7 * 86400000));
+  return weeks % 2 === 0 ? monday : shiftDays(monday, -7);
+}
+
 /** Record-cadence key used to dedupe entries within a period. */
 function periodKeyFor(cadence, dateStr) {
   if (cadence === 'weekly') return isoWeek(dateStr);
+  if (cadence === 'biweekly') return isoWeek(fortnightStart(dateStr));
   if (cadence === 'monthly') return String(dateStr).slice(0, 7);
   if (cadence === 'once') return 'once';
   return dateStr;
@@ -113,9 +123,11 @@ function freezePeriodStart(freezeRefresh, dateStr) {
 /** Is `key` a real period key for this cadence? (Rejects 2026-02-31 and W53 in a 52-week year.) */
 function validPeriodKey(cadence, key) {
   key = String(key || '');
-  if (cadence === 'weekly') {
+  if (cadence === 'weekly' || cadence === 'biweekly') {
     if (!/^\d{4}-W\d{2}$/.test(key)) return false;
-    return isoWeek(periodKeyDate(key)) === key;
+    var monday = periodKeyDate(key);
+    if (isoWeek(monday) !== key) return false;
+    return cadence === 'weekly' || fortnightStart(monday) === monday;
   }
   if (cadence === 'monthly') {
     return /^\d{4}-(0[1-9]|1[0-2])$/.test(key);
@@ -214,6 +226,7 @@ function outstandingChorePeriods(rows, categoryId) {
 /** The period after `key` — lets the sweep walk closed periods in order. */
 function nextChorePeriodKey(cadence, key) {
   if (cadence === 'weekly') return isoWeek(shiftDays(periodKeyDate(key), 7));
+  if (cadence === 'biweekly') return isoWeek(shiftDays(periodKeyDate(key), 14));
   if (cadence === 'monthly') {
     var y = Number(key.slice(0, 4));
     var m = Number(key.slice(5, 7)) + 1;
@@ -231,9 +244,10 @@ var CHORE_DUE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
  * a once-chore's is its optional dueDate.
  */
 function choreDueDateFor(cat, periodKey) {
-  if (cat.cadence === 'weekly') {
+  if (cat.cadence === 'weekly' || cat.cadence === 'biweekly') {
     var offset = CHORE_DUE_DAYS.indexOf(cat.dueDay);
-    return shiftDays(periodKeyDate(periodKey), offset === -1 ? 6 : offset);
+    // A fortnight's due day falls in its second week.
+    return shiftDays(periodKeyDate(periodKey), (cat.cadence === 'biweekly' ? 7 : 0) + (offset === -1 ? 6 : offset));
   }
   if (cat.cadence === 'monthly') {
     return shiftDays(nextChorePeriodKey('monthly', periodKey) + '-01', -1);
@@ -312,8 +326,8 @@ function choreDrainCount(rows, categoryId, periodKey) {
 function choreGroup(cat, todayStr, hasOutstanding) {
   if (hasOutstanding) return 'today';
   if (cat.cadence === 'daily') return 'today';
-  if (cat.cadence === 'weekly') {
-    return choreDueDateFor(cat, periodKeyFor('weekly', todayStr)) === todayStr ? 'today' : 'week';
+  if (cat.cadence === 'weekly' || cat.cadence === 'biweekly') {
+    return choreDueDateFor(cat, periodKeyFor(cat.cadence, todayStr)) === todayStr ? 'today' : 'week';
   }
   if (cat.cadence === 'once') return cat.dueDate && cat.dueDate <= todayStr ? 'today' : 'month';
   return 'month';
@@ -737,7 +751,7 @@ function isWholeHour(t) {
 function normalizeCategory(raw) {
   raw = raw || {};
   if (raw.kind === 'chore') {
-    var cadence = raw.cadence === 'weekly' || raw.cadence === 'monthly' || raw.cadence === 'once'
+    var cadence = raw.cadence === 'weekly' || raw.cadence === 'biweekly' || raw.cadence === 'monthly' || raw.cadence === 'once'
       ? raw.cadence : (raw.cadence === 'daily' ? 'daily' : String(raw.cadence || ''));
     return {
       id: raw.id ? slugify(raw.id) : slugify(raw.name),
@@ -787,8 +801,8 @@ function validateCategory(cat) {
   if (!cat.id) errs.push('A name is required (used to build the id).');
   if (!cat.name) errs.push('Name is required.');
   if (cat.kind === 'chore') {
-    if (cat.cadence !== 'daily' && cat.cadence !== 'weekly' && cat.cadence !== 'monthly' && cat.cadence !== 'once') {
-      errs.push('Chore cadence must be daily, weekly, monthly, or once.');
+    if (['daily', 'weekly', 'biweekly', 'monthly', 'once'].indexOf(cat.cadence) === -1) {
+      errs.push('Chore cadence must be daily, weekly, biweekly, monthly, or once.');
     }
     if (!(cat.value > 0)) errs.push('Chore value must be a positive number.');
     if (cat.assignee && !/^[^@\s]+@[^@\s]+$/.test(cat.assignee)) errs.push('Assignee must be an email address, or blank for either of you.');
@@ -797,7 +811,7 @@ function validateCategory(cat) {
       else if (!validPeriodKey('daily', cat.dueDate)) errs.push('Due date must be a real date like 2026-09-30.');
     }
     if (cat.dueDay) {
-      if (cat.cadence !== 'weekly') errs.push('A due day only applies to weekly chores.');
+      if (cat.cadence !== 'weekly' && cat.cadence !== 'biweekly') errs.push('A due day only applies to weekly or fortnightly chores.');
       else if (CHORE_DUE_DAYS.indexOf(cat.dueDay) === -1) errs.push('Due day must be a day like wed, or blank for end of week.');
     }
     if (!isWholeHour(cat.reminderTime)) errs.push('Reminder time must be a whole hour like 21:00, or blank.');

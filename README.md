@@ -117,3 +117,12 @@ In the `samsite` repo, decide whether to delete `habits/` or leave a
 redirect page at `habits/index.html` pointing to
 `https://homebase.samnichols.dev/`. The redirect is recommended, since old
 check-up emails still link there.
+
+## Settings
+
+Rows in the `settings` table, editable in the SQL editor. The app writes
+`chorePauseUntil` itself from the pause card; the rest are manual.
+
+| key | default | meaning |
+|---|---|---|
+| `choreDigestTime` | `08:00` | Hour (Denver, whole hour) the morning chore digest goes out. One email per person listing the chores due that day. |

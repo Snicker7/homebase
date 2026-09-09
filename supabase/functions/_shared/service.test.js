@@ -292,3 +292,115 @@ test('checkup: records via a verified payload and reports already recorded', () 
   assert.strictEqual(r.event.amount, 0.25);
   assert.match(svc.checkup(payload).error, /already recorded/);
 });
+
+test('claim together: splits the payout into one row per person', () => {
+  const { ctx, store } = makeCtx({ categories: [DISHES] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN });
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes', together: true });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 1);
+  assert.strictEqual(r.event.amount, 1);
+  assert.strictEqual(r.event.together, true);
+  const claims = store.readLedgerRows().filter((x) => x.type === 'claim');
+  assert.deepStrictEqual(claims.map((x) => [x.actor, x.amount, x.balanceAfter]).sort(), [[ANN, 1, 1], [BO, 1, 1]]);
+  assert.strictEqual(svc.route({ action: 'state', user: BO }).wallet, 1);
+  assert.strictEqual(svc.route({ action: 'state', user: BO }).chores[0].claimedBy, 'Ann & Bo');
+  assert.match(svc.route({ action: 'claim', user: BO, categoryId: 'dishes' }).error, /already done/);
+});
+
+test('claim together: the tapper keeps the odd cent', () => {
+  const { ctx, store } = makeCtx({ categories: [{ ...DISHES, value: 2.01 }] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: BO });
+  const r = svc.route({ action: 'claim', user: BO, categoryId: 'dishes', together: true });
+  assert.strictEqual(r.wallet, 1.01);
+  const claims = store.readLedgerRows().filter((x) => x.type === 'claim');
+  assert.deepStrictEqual(claims.map((x) => [x.actor, x.amount]).sort(), [[ANN, 1], [BO, 1.01]]);
+});
+
+test('claim together: refused on an assigned chore', () => {
+  const { ctx } = makeCtx({ categories: [{ ...DISHES, assignee: ANN }] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN });
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes', together: true });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /assigned/);
+});
+
+/* ── fortnightly chores ────────────────────────────────────────────────── */
+const BINS = { id: 'bins', kind: 'chore', name: 'Bins', emoji: '🗑️', cadence: 'biweekly', value: 4, assignee: '', dueDate: '', dueDay: '', notes: '', reminderTime: '', active: true };
+
+test('biweekly chore: an undone fortnight drains onto its key and stays claimable next fortnight', () => {
+  // W35 ran Aug 24 – Sep 6; today is Tue Sep 8, inside W37.
+  const { ctx, store } = makeCtx({
+    categories: [BINS],
+    choreStates: [{ category: 'bins', state: { since: '2026-W35', sweepFrom: '2026-W35', chargedThrough: '2026-09-06' } }],
+  });
+  const svc = createService(ctx);
+  const st = svc.route({ action: 'state', user: ANN });
+  assert.strictEqual(st.chores[0].claimablePeriodKey, '2026-W37');
+  const penalties = store.readLedgerRows().filter((r) => r.type === 'penalty');
+  assert.ok(penalties.length > 0);
+  assert.ok(penalties.every((r) => r.periodKey === '2026-W35'));
+  assert.deepStrictEqual(st.chores[0].outstanding.map((o) => o.periodKey), ['2026-W35']);
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'bins', periodKey: '2026-W35' });
+  assert.strictEqual(r.ok, true);
+  assert.ok(r.event.pot > 0);
+  assert.strictEqual(r.event.amount, 4 + r.event.pot);
+});
+
+/* ── morning chore digest ──────────────────────────────────────────────── */
+// 08:00 Denver on Tue 2026-09-08 is 14:00Z.
+const DIGEST_HOUR = '2026-09-08T14:00:00Z';
+const TRASH = { ...DISHES, id: 'trash', name: 'Trash', emoji: '🗑️', value: 1, assignee: BO };
+
+test('digest: one morning email each, listing own and shared chores due today', async () => {
+  const { ctx, sent } = makeCtx({ nowIso: DIGEST_HOUR, categories: [DISHES, TRASH] });
+  const r = await createService(ctx).dispatch();
+  assert.deepStrictEqual(r, { ok: true, failures: [] });
+  assert.strictEqual(sent.length, 2);
+  const to = (who) => sent.find((m) => m.to === who);
+  assert.match(to(ANN).subject, /Dishes/);
+  assert.doesNotMatch(to(ANN).subject, /Trash/);
+  assert.match(to(BO).subject, /Dishes/);
+  assert.match(to(BO).subject, /Trash/);
+  assert.match(to(BO).html, /\$2\.00/);
+});
+
+test('digest: claimed chores drop out, and nobody is mailed when nothing is due', async () => {
+  const claimed = { id: 'c1', timestamp: new Date('2026-09-08T13:00:00Z'), type: 'claim', category: 'dishes', periodKey: '2026-09-08', result: '', freezeUsed: false, amount: 2, balanceAfter: 2, actor: BO, note: '' };
+  const { ctx, sent } = makeCtx({ nowIso: DIGEST_HOUR, categories: [DISHES], ledger: [claimed] });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 0);
+});
+
+test('digest: a waiting pot is mentioned', async () => {
+  const { ctx, sent } = makeCtx({
+    nowIso: DIGEST_HOUR, categories: [DISHES],
+    choreStates: [{ category: 'dishes', state: { since: '2026-09-06', sweepFrom: '2026-09-06', chargedThrough: '2026-09-06' } }],
+  });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 2);
+  assert.match(sent[0].html, /pot/i);
+});
+
+test('digest: silent while chores are paused', async () => {
+  const { ctx, sent } = makeCtx({ nowIso: DIGEST_HOUR, categories: [DISHES], settings: { chorePauseUntil: '2026-09-20' } });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 0);
+});
+
+test('digest: fires at the configured hour, and per-chore reminder hours no longer send', async () => {
+  const nine = makeCtx({ nowIso: DIGEST_HOUR, categories: [DISHES], settings: { choreDigestTime: '09:00' } });
+  await createService(nine.ctx).dispatch();
+  assert.strictEqual(nine.sent.length, 0);
+  // 09:00 Denver is 15:00Z.
+  const later = makeCtx({ nowIso: '2026-09-08T15:00:00Z', categories: [DISHES], settings: { choreDigestTime: '09:00' } });
+  await createService(later.ctx).dispatch();
+  assert.strictEqual(later.sent.length, 2);
+  // 20:00 Denver Tue is 02:00Z Wed: Dishes' own reminder hour, now silent.
+  const evening = makeCtx({ nowIso: '2026-09-09T02:00:00Z', categories: [DISHES] });
+  await createService(evening.ctx).dispatch();
+  assert.strictEqual(evening.sent.length, 0);
+});
