@@ -745,6 +745,9 @@ async function boot() {
     checkinFlow(t);
     return;
   }
+  // Show the login form before the session check: getSession() refreshes an
+  // expired token over the network, and the page should not sit blank meanwhile.
+  setView('login');
   // Supabase puts the magic-link session in the URL hash; the client
   // consumes it and fires onAuthChange.
   const session = await getSession();

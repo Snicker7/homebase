@@ -96,6 +96,8 @@ function money(cell, field, lineNo) {
 export function parseLedgerCsv(text) {
   const [header, ...lines] = parseCsv(text);
   const idx = Object.fromEntries(header.map((h, i) => [h.trim(), i]));
+  // The production sheet predates the rename from nightDate to periodKey.
+  if (!('periodKey' in idx) && 'nightDate' in idx) idx.periodKey = idx.nightDate;
   for (const k of ['id', 'timestamp', 'type', 'category', 'periodKey', 'result', 'freezeUsed', 'amount', 'balanceAfter', 'actor', 'note']) {
     if (!(k in idx)) throw new Error('ledger.csv missing column ' + k);
   }

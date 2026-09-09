@@ -1,6 +1,8 @@
 // js/api.js — everything the dashboard needs from Supabase: the auth session,
 // the authenticated `api` calls, and the anon-key check-in call.
-import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+// supabase-js is vendored as a UMD bundle (js/vendor/supabase.js, loaded by
+// index.html) so the login screen never waits on a CDN module graph.
+const { createClient } = window.supabase;
 
 const cfg = window.CONFIG || {};
 export const configured = () =>
