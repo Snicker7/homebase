@@ -6,7 +6,7 @@
 
 **Architecture:** The reward engine moves over unchanged. The Apps Script glue (`main.gs`) is ported almost line for line into `service.js`, which runs synchronously against an in-memory snapshot of the tables and records a write journal. Three thin Deno edge functions (`api`, `checkup`, `dispatch`) each open a transaction, take an advisory lock, load the snapshot, run one service action, and apply the journal. The frontend keeps its rendering code and swaps JSONP for Supabase auth plus `fetch`.
 
-**Tech Stack:** Supabase (Postgres 15, Auth, Edge Functions on Deno, pg_cron, pg_net), postgres.js, Resend, vanilla JS on GitHub Pages, Node 20+ test runner, pgTAP via `supabase test db`.
+**Tech Stack:** Supabase (Postgres 17, Auth, Edge Functions on Deno, pg_cron, pg_net), postgres.js, Resend, vanilla JS on GitHub Pages, Node 20+ test runner, pgTAP via `supabase test db`.
 
 **Spec:** `docs/superpowers/specs/2026-09-08-homebase-design.md`
 
@@ -431,7 +431,7 @@ Suggested commit: `Add signed check-up tokens`.
   - `isHoliday(dateStr) -> boolean`
   - `readLedgerRows() -> array` (fresh copies each call), `appendLedger(ev) -> id`, `deleteLedgerRow(id)`, `updateLedgerRow(id, patch)`
   - `journal() -> array` of `{ op: 'append', row } | { op: 'delete', id } | { op: 'update', id, patch } | { op: 'habitState', actor, category, state } | { op: 'choreState', category, state } | { op: 'categories', list } | { op: 'setting', key, value }` (value `null` means delete). Later entries for the same key supersede earlier ones only in `pg.js`; the store records everything in order.
-  - `newId()` uses `crypto.randomUUID()`.
+  - Ledger ids come from `crypto.randomUUID()` inside `appendLedger`; nothing else needs an id generator.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1981,7 +1981,7 @@ Deno.serve(async (req) => {
 });
 ```
 
-Note: mail sends happen inside the transaction. A send failure is caught inside `dispatch`, so it never rolls back the refresh. That matches the Apps Script, where the refresh was already flushed before mail went out.
+Note: mail must NOT be sent inside the transaction. `dispatch/index.ts` passes a queueing mailer into `runAction`, and sends the queued messages through Resend only after the transaction commits, merging any send failures into `failures`. That keeps settlement under the lock and mail outside it, as the Apps Script did (lock around refresh/sweep, mail after), and other requests never wait on Resend. Phase 2's Plaid sync must follow the same rule: network calls outside `runAction`, only the resulting rows inside.
 
 - [ ] **Step 5: Turn off gateway JWT checks for the two public functions**
 

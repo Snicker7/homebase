@@ -274,7 +274,10 @@ Postgres cron calls `dispatch` at minute zero of every hour through `pg_net`.
 For each active category: send the reminder at its reminder hour, send the
 check-up at its check-up hour, and run freeze and bonus settlement at period
 rollover. Mail is sent through Resend from `homebase@samnichols.dev` with
-Reply-To set to snic9004@gmail.com; no mailbox exists for the sender. A failed
+Reply-To set to snic9004@gmail.com; no mailbox exists for the sender. The
+settlement runs inside the locked transaction; the messages it produces are
+queued and sent only after the transaction commits, so a failed commit never
+leaves mail already sent and other requests never wait on Resend. A failed
 send is logged and skipped, not retried, since a late reminder is noise.
 
 ### One-tap check-up
@@ -353,7 +356,7 @@ tablet breakpoint and a 900px maximum width for the budget screens.
 
 ## Failure handling
 
-- Functions return `{ok: false, error, code}`; the UI shows a toast and leaves
+- Functions return `{ok: false, error}`; the UI shows a banner and leaves
   state unchanged.
 - Writes are safe to retry: entries are guarded per period, transactions are
   keyed by Plaid id, and the cursor is saved only after its batch commits.
