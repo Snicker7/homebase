@@ -56,6 +56,33 @@ function banner(msg, isError) {
   b.hidden = !msg;
 }
 
+// The wallet counts to its new value rather than jumping, so a payout reads
+// as money arriving.
+let walletShown = null; // null until the first render, which snaps
+let walletAnim = 0;
+function setWallet(n) {
+  const el = $('wallet');
+  const to = Number(n) || 0;
+  const from = walletShown;
+  cancelAnimationFrame(walletAnim);
+  if (from === null || Math.abs(to - from) < 0.005 || matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    walletShown = to; el.textContent = money(to); return;
+  }
+  const t0 = performance.now();
+  const step = (t) => {
+    const k = Math.min(1, (t - t0) / 450);
+    const eased = 1 - Math.pow(1 - k, 3);
+    el.textContent = money(from + (to - from) * eased);
+    if (k < 1) walletAnim = requestAnimationFrame(step); else walletShown = to;
+  };
+  walletAnim = requestAnimationFrame(step);
+}
+// Cached state is on screen while the fresh copy loads: dim the wallet a touch.
+function setUpdating(on) {
+  const s = $('wallet').closest('.stat');
+  if (s) s.classList.toggle('updating', !!on);
+}
+
 function setView(name) {
   ['loginView', 'checkinView', 'dashView', 'adminView'].forEach((v) => ($(v).hidden = true));
   $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView' }[name]).hidden = false;
@@ -71,7 +98,7 @@ let SIGNED_IN = false;
 /* ── rendering ──────────────────────────────────────────────────────────────*/
 function render(r) {
   $('whoami').textContent = r.name || r.user || '';
-  $('wallet').textContent = money(r.wallet);
+  setWallet(r.wallet);
   $('manageBtn').hidden = false;
   renderPartner(r.partner);
   renderCatCards(r.cats || []);
@@ -87,53 +114,152 @@ function renderPartner(p) {
   $('partnerWallet').textContent = money(p.wallet);
 }
 
+/* ── habit cards ────────────────────────────────────────────────────────── */
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+const DAYS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const localToday = () => {
+  const d = new Date();
+  return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2);
+};
+// "2026-09-08" → "Mon, Sep 8"; "2026-W37" → "Week 37"; anything else unchanged.
+function periodLabel(key) {
+  const k = String(key || '');
+  const w = /^(\d{4})-W(\d{2})$/.exec(k);
+  if (w) return 'Week ' + Number(w[2]);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(k);
+  if (!m) return k;
+  if (k === localToday()) return 'Today';
+  if (k === shiftDays(localToday(), -1)) return 'Yesterday';
+  const d = new Date(Date.UTC(+m[1], +m[2] - 1, +m[3]));
+  return DAYS[d.getUTCDay()] + ', ' + MONTHS[d.getUTCMonth()] + ' ' + d.getUTCDate();
+}
+
+// One in-place question per card or feed row: the action row hides, the
+// question shows, and Cancel puts things back. No browser dialogs.
+function askInline(host, text, yesLabel, danger, onYes) {
+  const ask = host.querySelector('.ask');
+  const rows = host.querySelectorAll('.actions, .status');
+  ask.querySelector('.ask-text').textContent = text;
+  const yes = ask.querySelector('[data-yes]');
+  yes.textContent = yesLabel;
+  yes.className = danger ? 'danger' : 'ok';
+  const close = () => { ask.hidden = true; rows.forEach((r) => { r.hidden = r.dataset.wasHidden === '1'; }); };
+  rows.forEach((r) => { r.dataset.wasHidden = r.hidden ? '1' : '0'; r.hidden = true; });
+  ask.hidden = false;
+  yes.onclick = () => { close(); onYes(yes); };
+  ask.querySelector('[data-no]').onclick = close;
+}
+
+// Surfaces a failure where the tap happened rather than at the top of the page.
+function cardError(host, msg) {
+  const el = host.querySelector('.inline-err');
+  if (!el) { banner(msg, true); return; }
+  el.textContent = msg;
+  el.hidden = !msg;
+}
+
 function renderCatCards(cats) {
   const wrap = $('catCards');
   wrap.innerHTML = '';
   if (!cats.length) {
-    wrap.innerHTML = '<div class="card"><p class="muted">No categories yet. Tap "Categories" to add one.</p></div>';
+    wrap.innerHTML = '<div class="card"><p class="muted">No habits yet. Tap "Categories" to add one.</p></div>';
     return;
   }
   cats.forEach((c) => {
-    const card = document.createElement('div');
-    card.className = 'card';
+    const card = document.createElement('section');
+    card.className = 'card habit';
+    const label = (c.emoji ? c.emoji + ' ' : '') + c.name;
+    const period = periodLabel(c.nextPeriodKey);
+    const freezes = Number(c.freezeAvailable) || 0;
+    const recorded = c.recordedResult;
     card.innerHTML =
-      '<h2>' + (c.emoji ? esc(c.emoji) + ' ' : '') + esc(c.name) + '</h2>' +
-      '<div class="prow">' +
-      '<div><span class="label">Streak</span><span class="pval">' + c.streak + '</span></div>' +
-      '<div><span class="label">If you do it</span><span class="pval">' + money(c.potential) + '</span></div>' +
-      '<div><span class="label">Freezes</span><span class="pval">' + c.freezeAvailable + '</span></div>' +
+      '<div class="habit-head">' +
+      '<h2>' + (c.emoji ? '<span class="glyph">' + esc(c.emoji) + '</span>' : '') + esc(c.name) + '</h2>' +
+      '<div class="streak" title="Current streak"><span class="flame">🔥</span>' + Number(c.streak || 0) + '</div>' +
       '</div>' +
-      '<div class="row main-actions" style="margin-top:8px">' +
-      '<button class="ok" data-result="on_time">✅ Did it</button>' +
-      '<button class="danger" data-result="missed">❌ Missed</button>' +
+      '<div class="hstrip">' +
+      '<span class="hs"><b class="num">' + money(c.potential) + '</b> if you do it</span>' +
+      '<span class="hs freezes" title="Freezes left this period">' +
+      (freezes ? '❄️'.repeat(Math.min(freezes, 5)) + ' <span class="dim">' + freezes + ' left</span>' : '<span class="dim">no freezes left</span>') +
+      '</span>' +
       '</div>' +
-      '<p class="muted">' + (c.cadence === 'weekly' ? 'Weekly' : 'Daily') +
-      ' • records ' + esc(c.nextPeriodKey || '—') + ' • last: ' + esc(c.lastRecordedKey || '—') + '</p>' +
-      (c.notes
-        ? '<details class="notes"><summary>📝 Notes</summary><p class="notes-text">' + esc(c.notes) + '</p></details>'
-        : '') +
-      '<details class="fix-past">' +
-      '<summary>✏️ Fix a past ' + (c.cadence === 'weekly' ? 'week' : 'day') + '</summary>' +
+      '<div class="actions" data-mode="record"' + (recorded ? ' hidden' : '') + '>' +
+      '<button class="ok" data-result="on_time">Did it</button>' +
+      '<button class="danger" data-result="missed">Missed</button>' +
+      '</div>' +
+      '<div class="status ' + (recorded === 'on_time' ? 'good' : 'bad') + '"' + (recorded ? '' : ' hidden') + '>' +
+      '<span class="status-text">' + (recorded === 'on_time' ? '✅ Done' : '❌ Missed') + ' · ' + esc(period) + '</span>' +
+      '<button class="link-btn" data-change>Change</button>' +
+      '</div>' +
+      '<div class="ask" hidden><p class="ask-text"></p>' +
+      '<div class="ask-btns"><button class="ghost" data-no>Cancel</button><button data-yes>Yes</button></div></div>' +
+      '<p class="inline-err" hidden></p>' +
+      '<p class="hmeta">' + (c.cadence === 'weekly' ? 'Weekly' : 'Nightly') + ' · recording ' + esc(period) +
+      (c.lastRecordedKey ? ' · last ' + esc(periodLabel(c.lastRecordedKey)) : '') + '</p>' +
+      '<details class="more"><summary>More</summary>' +
+      (c.notes ? '<p class="notes-text">' + esc(c.notes) + '</p>' : '') +
+      '<div class="fix-past">' +
+      '<p class="fix-title">Fix a past ' + (c.cadence === 'weekly' ? 'week' : 'night') + '</p>' +
       '<div class="row fix-row">' +
       (c.cadence === 'weekly'
         ? '<select class="fix-picker"></select>'
         : '<input class="fix-picker" type="date" value="' + esc(c.nextPeriodKey || '') +
           '" max="' + esc(c.nextPeriodKey || '') + '" />') +
-      '<button class="ok" data-fix="on_time">✅ Did it</button>' +
-      '<button class="danger" data-fix="missed">❌ Missed</button>' +
+      '</div>' +
+      '<div class="row fix-btns">' +
+      '<button class="ok" data-fix="on_time">Did it</button>' +
+      '<button class="danger" data-fix="missed">Missed</button>' +
       '</div>' +
       '<p class="muted fix-current"></p>' +
+      '</div>' +
       '</details>';
     wrap.appendChild(card);
-    const label = (c.emoji ? c.emoji + ' ' : '') + c.name;
-    card.querySelectorAll('.main-actions button[data-result]').forEach((b) =>
-      b.addEventListener('click', () => onRecordClick(c, b.getAttribute('data-result'), label)));
+
+    card.querySelectorAll('.actions button[data-result]').forEach((b) =>
+      b.addEventListener('click', () => onRecordClick(card, c, b.getAttribute('data-result'), label, b)));
+    // "Change" reopens the buttons; a tap on the other answer then amends.
+    card.querySelector('[data-change]').addEventListener('click', () => {
+      card.querySelector('.status').hidden = true;
+      card.querySelector('.actions').hidden = false;
+      card.querySelector('.actions').dataset.mode = 'amend';
+    });
     wireFixPast(card, c, label);
   });
 }
 
+// Marks the tapped button as working and freezes the rest of the page's
+// actions until the round trip lands.
+function startWork(btn) {
+  setBusy(true);
+  if (btn) btn.classList.add('is-loading');
+}
+function endWork(btn) {
+  if (btn) btn.classList.remove('is-loading');
+  setBusy(false);
+}
+
+function onRecordClick(card, c, result, label, btn) {
+  cardError(card, '');
+  if (!c.recordedResult) {
+    if (result === 'missed') {
+      const why = Number(c.freezeAvailable) > 0 ? 'A freeze covers it.' : 'Your streak resets.';
+      askInline(card, 'Record a miss for ' + label + '? ' + why, 'Yes, missed', true, (b) => recordCat(card, c.id, result, label, b));
+      return;
+    }
+    recordCat(card, c.id, result, label, btn);
+    return;
+  }
+  if (c.recordedResult === result) {
+    card.querySelector('.actions').hidden = true;
+    card.querySelector('.status').hidden = false;
+    return;
+  }
+  askInline(card, 'Change ' + periodLabel(c.nextPeriodKey) + ' to ' + prettyResult(result) + '? Later entries adjust.',
+    'Change it', result === 'missed', (b) => amend(card, c.id, c.nextPeriodKey, result, b));
+}
+
 const DUE_DAY_NAMES = { mon: 'Mon', tue: 'Tue', wed: 'Wed', thu: 'Thu', fri: 'Fri', sat: 'Sat', sun: 'Sun' };
+
 
 function renderChoreCards(chores, pauseUntil) {
   const wrap = $('choreCards');
@@ -206,7 +332,7 @@ function choreCard(c) {
     try {
       const r = await api('claim', periodKey ? { categoryId: c.id, periodKey } : { categoryId: c.id });
       if (!r.ok) { banner(r.error || 'Could not claim', true); return; }
-      if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
+      if (typeof r.wallet === 'number') setWallet(r.wallet);
       banner('🧹 ' + label + ' — +' + money(r.event.amount) +
         (r.event.pot > 0 ? ' (includes the ' + money(r.event.pot) + ' pot)' : '') + '.', false);
       await showDashboard(true);
@@ -260,77 +386,90 @@ function renderChorePause(wrap, pauseUntil) {
   });
 }
 
+
+/* ── activity feed ──────────────────────────────────────────────────────── */
 function describe(e) {
-  if (e.type === 'spend') return '🛒 ' + esc(e.note || 'Spent');
-  if (e.type === 'deposit') return '💵 ' + esc(e.note || 'Added money');
   const cat = e.categoryName || e.category;
-  if (e.type === 'bonus') return '🎁 ' + esc(e.note || 'Bonus') + ' (' + esc(cat) + ')';
-  if (e.type === 'claim') return '🧹 Did it: ' + esc(e.categoryName || e.category);
-  if (e.type === 'penalty') return '⚠️ ' + esc(e.note || ('Unclaimed: ' + (e.categoryName || e.category)));
+  if (e.type === 'spend') return { icon: '🛒', text: e.note || 'Spent', sub: '' };
+  if (e.type === 'deposit') return { icon: '💵', text: e.note || 'Added money', sub: '' };
+  if (e.type === 'bonus') return { icon: '🎁', text: e.note || 'Bonus', sub: cat || '' };
+  if (e.type === 'claim') return { icon: '🧹', text: 'Did it', sub: cat || '' };
+  if (e.type === 'penalty') return { icon: '⚠️', text: e.note || 'Unclaimed', sub: cat || '' };
   if (e.type === 'entry') {
-    const tag = cat ? ' (' + esc(cat) + ')' : '';
-    if (e.result === 'on_time') return '✅ On time' + tag;
-    if (e.freezeUsed) return '❄️ Freeze used' + tag;
-    return '❌ Missed' + tag;
+    if (e.result === 'on_time') return { icon: '✅', text: 'Done', sub: cat || '' };
+    if (e.freezeUsed) return { icon: '❄️', text: 'Freeze used', sub: cat || '' };
+    return { icon: '❌', text: 'Missed', sub: cat || '' };
   }
-  return e.type;
+  return { icon: '•', text: e.type, sub: '' };
 }
 function amountCell(e) {
-  if (e.type === 'spend') return '−' + money(e.amount);
-  if (e.amount < 0) return '−' + money(-e.amount);
-  if (e.amount > 0) return '+' + money(e.amount);
-  return '';
+  const n = Number(e.amount) || 0;
+  if (e.type === 'spend' || n < 0) return { text: '−' + money(Math.abs(n)), cls: 'minus' };
+  if (n > 0) return { text: '+' + money(n), cls: 'plus' };
+  return { text: '', cls: 'zero' };
 }
 function renderLedger(rows) {
-  const body = $('ledger').querySelector('tbody');
-  body.innerHTML = '';
+  const feed = $('ledger');
+  feed.innerHTML = '';
   $('ledgerEmpty').hidden = rows.length > 0;
+  let lastDay = null;
   rows.forEach((e) => {
-    const tr = document.createElement('tr');
-    const when = (e.periodKey || (e.timestamp || '').slice(0, 10) || '').toString();
-    const canDelete = e.canDelete !== undefined
-      ? e.canDelete
-      : (e.type === 'spend' || e.type === 'deposit');
-    const label = e.type === 'entry' ? 'Remove this answer' : 'Remove this entry';
-    const del = canDelete && e.id
-      ? '<button class="link-btn del" data-del="' + esc(e.id) + '" data-type="' + esc(e.type) +
-        '" title="' + label + '" aria-label="' + label + '">✕</button>'
-      : '';
-    tr.innerHTML =
-      '<td>' + esc(when) + '</td>' +
-      '<td>' + describe(e) + '</td>' +
-      '<td class="amt">' + amountCell(e) + '</td>' +
-      '<td class="bal">' + money(e.balanceAfter) + '</td>' +
-      '<td class="del-cell">' + del + '</td>';
-    body.appendChild(tr);
+    const when = String(e.periodKey || (e.timestamp || '').slice(0, 10) || '');
+    if (when !== lastDay) {
+      const h = document.createElement('p');
+      h.className = 'feed-day';
+      h.textContent = periodLabel(when);
+      feed.appendChild(h);
+      lastDay = when;
+    }
+    const d = describe(e);
+    const a = amountCell(e);
+    const canDelete = e.canDelete !== undefined ? e.canDelete : (e.type === 'spend' || e.type === 'deposit');
+    const isEntry = e.type === 'entry';
+    const item = document.createElement('div');
+    item.className = 'fe';
+    item.innerHTML =
+      '<div class="actions fe-row">' +
+      '<span class="fe-ico">' + d.icon + '</span>' +
+      '<div class="fe-main"><span class="fe-text">' + esc(d.text) + '</span>' +
+      (d.sub ? '<span class="fe-sub">' + esc(d.sub) + '</span>' : '') + '</div>' +
+      '<div class="fe-right"><span class="fe-amt ' + a.cls + '">' + a.text + '</span>' +
+      '<span class="fe-bal">' + money(e.balanceAfter) + '</span></div>' +
+      (canDelete && e.id
+        ? '<button class="fe-del" data-del aria-label="' + (isEntry ? 'Remove this answer' : 'Remove this entry') + '">✕</button>'
+        : '') +
+      '</div>' +
+      '<div class="ask" hidden><p class="ask-text"></p>' +
+      '<div class="ask-btns"><button class="ghost" data-no>Cancel</button><button data-yes>Remove</button></div></div>' +
+      '<p class="inline-err" hidden></p>';
+    feed.appendChild(item);
+    const del = item.querySelector('[data-del]');
+    if (del) del.addEventListener('click', () => {
+      if (inFlight) return;
+      askInline(item,
+        isEntry ? 'Remove this answer? The night reopens and streaks and payouts recompute.' : 'Remove this entry? Your wallet updates.',
+        'Remove', true, (b) => deleteEntry(item, e.id, b));
+    });
   });
-  body.querySelectorAll('button[data-del]').forEach((b) =>
-    b.addEventListener('click', () => deleteEntry(b.getAttribute('data-del'), b.getAttribute('data-type'))));
 }
 
-async function deleteEntry(id, type) {
+async function deleteEntry(item, id, btn) {
   if (inFlight) return;
-  const isEntry = type === 'entry';
-  const ask = isEntry
-    ? 'Remove this answer? The period reopens, and your streak, freezes, and payouts are recomputed from the corrected history.'
-    : 'Remove this entry? This updates your wallet total.';
-  if (!window.confirm(ask)) return;
-  setBusy(true);
-  banner('Removing…', false);
+  startWork(btn);
+  cardError(item, '');
   try {
     const r = await api('deleteEntry', { id });
-    if (!r.ok) { banner(r.error || 'Could not remove', true); return; }
-    if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
+    if (!r.ok) { cardError(item, r.error || 'Could not remove'); return; }
+    if (typeof r.wallet === 'number') setWallet(r.wallet);
     banner('Entry removed.', false);
     // Awaited inside the try so the in-flight lock outlives the re-render: the
     // buttons must not re-enable against stale card data.
     await showDashboard(true);
   } catch (err) {
-    banner(err.message, true);
-  } finally { setBusy(false); }
+    cardError(item, err.message);
+  } finally { endWork(btn); }
 }
 
-/* ── flows ──────────────────────────────────────────────────────────────────*/
 async function showDashboard(keepBanner) {
   setView('dash');
   if (!keepBanner) banner('', false);
@@ -338,7 +477,7 @@ async function showDashboard(keepBanner) {
   // while the round-trip runs.
   try {
     const cached = JSON.parse(localStorage.getItem('hb_state') || 'null');
-    if (cached && !keepBanner) { render(cached); banner('Refreshing…', false); }
+    if (cached && !keepBanner) { render(cached); setUpdating(true); }
   } catch { /* ignore */ }
   try {
     const r = await api('state');
@@ -357,8 +496,6 @@ async function showDashboard(keepBanner) {
       return;
     }
     try { localStorage.setItem('hb_state', JSON.stringify(r)); } catch { /* ignore */ }
-    // Clears the cached path's "Refreshing…" once the fresh data is in hand.
-    if (!keepBanner) banner('', false);
     render(r);
     // The admin views already flag an old deployment; the dashboard used to show
     // a friendly "No categories yet" instead. An empty list is a real [] — only
@@ -366,22 +503,16 @@ async function showDashboard(keepBanner) {
     if (!Array.isArray(r.cats)) banner(STALE_BACKEND_MSG, true);
   } catch (err) {
     banner(err.message, true);
-  }
+  } finally { setUpdating(false); }
 }
 
-async function recordCat(categoryId, result, label) {
+async function recordCat(card, categoryId, result, label, btn) {
   if (inFlight) return;
-  if (result === 'missed' &&
-      !window.confirm('Record a miss for "' + (label || 'this habit') + '"? ' +
-        'A freeze is used automatically if you have one; otherwise your streak takes the hit.')) {
-    return;
-  }
-  setBusy(true);
-  banner('Saving…', false);
+  startWork(btn);
   try {
     const r = await api('record', { categoryId, result });
-    if (!r.ok) { banner(r.error || 'Could not save', true); return; }
-    if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
+    if (!r.ok) { cardError(card, r.error || 'Could not save'); return; }
+    if (typeof r.wallet === 'number') setWallet(r.wallet);
     const e = r.event;
     if (e.result === 'on_time') banner('🎉 ' + (label || 'Done') + ' — earned ' + money(e.amount) + '.', false);
     else if (e.freezeUsed) banner('❄️ Freeze used — streak protected.', false);
@@ -390,49 +521,35 @@ async function recordCat(categoryId, result, label) {
     // otherwise a double-tap hits the backend's "already recorded" rejection.
     await showDashboard(true);
   } catch (err) {
-    banner(err.message, true);
-  } finally { setBusy(false); }
+    cardError(card, err.message);
+  } finally { endWork(btn); }
 }
 
-const prettyResult = (r) => (r === 'on_time' ? '✅ Did it' : '❌ Missed');
+const prettyResult = (r) => (r === 'on_time' ? 'Did it' : 'Missed');
 
-async function amend(categoryId, periodKey, result) {
+async function amend(card, categoryId, periodKey, result, btn) {
   if (inFlight) return;
-  setBusy(true);
-  banner('Saving…', false);
+  startWork(btn);
   try {
     const r = await api('amend', { categoryId, periodKey, result });
-    if (!r.ok) { banner(r.error || 'Could not save', true); return; }
-    if (r.unchanged) { banner('Already recorded — nothing changed.', false); return; }
-    if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
+    if (!r.ok) { cardError(card, r.error || 'Could not save'); return; }
+    if (r.unchanged) { banner('Already recorded — nothing changed.', false); await showDashboard(true); return; }
+    if (typeof r.wallet === 'number') setWallet(r.wallet);
     const n = (r.ripple && r.ripple.entriesChanged) || 0;
-    banner('Changed ' + periodKey + ' to ' + (result === 'on_time' ? '✅' : '❌') +
+    banner('Changed ' + periodLabel(periodKey) + ' to ' + prettyResult(result) +
       (n ? ' — ' + n + ' later ' + (n === 1 ? 'entry' : 'entries') + ' adjusted.' : '.'), false);
     // Awaited inside the try so the in-flight lock outlives the re-render: the
     // buttons must not re-enable against stale card data.
     await showDashboard(true);
   } catch (err) {
-    banner(err.message, true);
-  } finally { setBusy(false); }
-}
-
-function onRecordClick(c, result, label) {
-  if (!c.recordedResult) { recordCat(c.id, result, label); return; }
-  const period = c.cadence === 'weekly' ? 'last week' : 'last night';
-  if (c.recordedResult === result) {
-    banner('You already recorded ' + prettyResult(result) + ' for ' + period + ' — nothing to change.', false);
-    return;
-  }
-  if (!window.confirm('You recorded ' + prettyResult(c.recordedResult) + ' for ' + period +
-      ' (' + (c.nextPeriodKey || '') + '). Change it to ' + prettyResult(result) +
-      '? Later entries adjust automatically.')) return;
-  amend(c.id, c.nextPeriodKey, result);
+    cardError(card, err.message);
+  } finally { endWork(btn); }
 }
 
 function wireFixPast(card, c, label) {
-  const det = card.querySelector('details.fix-past');
-  const picker = det.querySelector('.fix-picker');
-  const cur = det.querySelector('.fix-current');
+  const det = card.querySelector('details.more');
+  const picker = card.querySelector('.fix-picker');
+  const cur = card.querySelector('.fix-current');
   let history = null; // periodKey -> 'on_time' | 'missed'; null until first open
 
   if (c.cadence === 'weekly' && c.nextPeriodKey) {
@@ -457,43 +574,41 @@ function wireFixPast(card, c, label) {
     const k = picker.value;
     if (!k || history === null) { cur.textContent = ''; return; }
     const r = history[k];
-    cur.textContent = r
-      ? 'Currently recorded: ' + prettyResult(r)
-      : 'Not recorded yet.';
+    cur.textContent = r ? 'Recorded: ' + prettyResult(r) : 'Not recorded yet.';
   };
 
   det.addEventListener('toggle', async () => {
     if (!det.open || history !== null) return;
     try {
       const r = await api('catHistory', { categoryId: c.id });
-      if (!r.ok) { banner(r.error || 'Could not load history', true); return; }
+      if (!r.ok) { cardError(card, r.error || 'Could not load history'); return; }
       history = {};
       (r.entries || []).forEach((e) => { history[e.periodKey] = e.result; });
       refreshCurrent();
-    } catch (err) { banner(err.message, true); }
+    } catch (err) { cardError(card, err.message); }
   });
   picker.addEventListener('change', refreshCurrent);
 
-  det.querySelectorAll('button[data-fix]').forEach((b) =>
+  card.querySelectorAll('button[data-fix]').forEach((b) =>
     b.addEventListener('click', () => {
       const key = picker.value;
       const result = b.getAttribute('data-fix');
-      if (!key) {
-        banner('Pick a ' + (c.cadence === 'weekly' ? 'week' : 'date') + ' first.', true);
-        return;
-      }
+      cardError(card, '');
+      if (!key) { cardError(card, 'Pick a ' + (c.cadence === 'weekly' ? 'week' : 'date') + ' first.'); return; }
       const existing = history && history[key];
-      if (existing === result) {
-        banner(key + ' is already recorded as ' + prettyResult(result) + '.', false);
+      if (existing === result) { cur.textContent = periodLabel(key) + ' is already ' + prettyResult(result) + '.'; return; }
+      const go = (btn) => amend(card, c.id, key, result, btn);
+      if (existing) {
+        askInline(card, 'Change ' + periodLabel(key) + ' from ' + prettyResult(existing) + ' to ' + prettyResult(result) + '? Later entries adjust.',
+          'Change it', result === 'missed', go);
         return;
       }
-      if (existing &&
-          !window.confirm('You recorded ' + prettyResult(existing) + ' for ' + key +
-            '. Change it to ' + prettyResult(result) + '? Later entries adjust automatically.')) return;
-      if (!existing && result === 'missed' &&
-          !window.confirm('Record a miss for "' + label + '" on ' + key + '? ' +
-            'A freeze is used automatically if one was available; otherwise your streak takes the hit.')) return;
-      amend(c.id, key, result);
+      if (result === 'missed') {
+        askInline(card, 'Record a miss for ' + label + ', ' + periodLabel(key) + '? A freeze is used if one was available.',
+          'Yes, missed', true, go);
+        return;
+      }
+      go(b);
     }));
 }
 
@@ -659,7 +774,7 @@ function wire() {
     try {
       const r = await api('spend', { amount, note });
       if (!r.ok) { banner(r.error || 'Could not save', true); return; }
-      if (typeof r.wallet === 'number') $('wallet').textContent = money(r.wallet);
+      if (typeof r.wallet === 'number') setWallet(r.wallet);
       $('spendAmount').value = ''; $('spendNote').value = '';
       // The backend floors a spend at the wallet balance, so report what
       // actually left rather than what was typed.
