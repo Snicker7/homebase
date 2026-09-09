@@ -19,5 +19,10 @@ export function readEnv() {
     mailReplyTo: get('MAIL_REPLY_TO', ''),
     dashboardUrl: get('DASHBOARD_URL'),
     allowedOrigins: get('ALLOWED_ORIGINS').split(',').map((s) => s.trim()),
+    // Empty defaults: only the plaid function needs these, and the others
+    // must keep booting when they are unset.
+    plaidClientId: get('PLAID_CLIENT_ID', ''),
+    plaidSecret: get('PLAID_SECRET', ''),
+    plaidEnv: get('PLAID_ENV', 'sandbox'),
   };
 }
