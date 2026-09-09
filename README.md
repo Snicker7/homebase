@@ -13,6 +13,9 @@ See `docs/superpowers/specs/2026-09-08-homebase-design.md`.
     npx supabase functions serve --env-file supabase/functions/.env   # in another shell
     python3 -m http.server 8000                                       # serve the frontend
 
+Copy `supabase/functions/.env.example` to `supabase/functions/.env` and fill
+in the values before serving functions locally.
+
 The Supabase CLI runs via `npx` — there's no global install in this repo.
 
 Running `npm test` with `DB_URL` set exercises the Postgres-backed tests
@@ -22,7 +25,8 @@ against the local database and leaves rows behind. Run
 ## Production setup (once)
 
 1. **Supabase project.** supabase.com, New project, region US West, note the
-   project ref and database password. Then locally:
+   project ref (shown in the dashboard URL and under Project Settings,
+   General) and database password. Then locally:
 
        npx supabase link --project-ref PROJECT_REF
        npx supabase db push
@@ -62,7 +66,13 @@ against the local database and leaves rows behind. Run
 
 5. **Cron.** Open `supabase/cron.sql`, fill in PROJECT_REF and
    DISPATCH_SECRET, run it in the SQL editor. Next hour, check
-   `cron.job_run_details` shows status `succeeded`.
+   `cron.job_run_details` shows status `succeeded` — that only means the
+   request was enqueued, not that the function answered. Confirm the
+   response too:
+
+       select status_code, content from net._http_response order by created desc limit 5;
+
+   Expect `status_code` 200 and a body containing `"ok":true`.
 
 6. **Frontend.** In `js/config.js`, replace the committed local-dev
    `SUPABASE_URL` and `SUPABASE_ANON_KEY` with the production project's URL
@@ -71,7 +81,8 @@ against the local database and leaves rows behind. Run
    `homebase.samnichols.dev`, enforce HTTPS. At your DNS host add
    `CNAME homebase -> snicker7.github.io`.
 
-7. **Migrate.** Run `dumpProps` in Apps Script, save the log as
+7. **Migrate.** `dumpProps` lives in `scripts/dump-props.gs` — paste it into
+   the Apps Script editor first, then run it and save the log as
    `scripts/data/props.json`; download the Ledger tab as
    `scripts/data/ledger.csv`. Then:
 

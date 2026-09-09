@@ -9,8 +9,10 @@ select cron.schedule(
   select net.http_post(
     url := 'https://PROJECT_REF.supabase.co/functions/v1/dispatch',
     headers := '{"Content-Type":"application/json","Authorization":"Bearer DISPATCH_SECRET"}'::jsonb,
-    body := '{}'::jsonb
+    body := '{}'::jsonb,
+    timeout_milliseconds := 60000
   );
   $$
 );
--- Check it ran: select * from cron.job_run_details order by start_time desc limit 5;
+-- Check the job fired: select * from cron.job_run_details order by start_time desc limit 5;
+-- Then confirm the function itself answered 200: select status_code, content from net._http_response order by created desc limit 5;

@@ -63,3 +63,16 @@ test('parseStamp resolves the right side of a DST transition, not just the close
   const fall = parseLedgerCsv(oneRowCsv('2026-11-01 03:00:00'));
   assert.strictEqual(fall[0].timestamp.toISOString(), '2026-11-01T10:00:00.000Z');
 });
+
+const amountCsv = (amount) =>
+  [HEADER, `11111111-1111-1111-1111-111111111111,2026-06-20 21:05:11,entry,bedtime,2026-06-19,on_time,FALSE,${amount},0.25,snic9004@gmail.com,`].join('\n');
+
+test('parseLedgerCsv strips currency formatting from amounts', () => {
+  assert.strictEqual(parseLedgerCsv(amountCsv('$1.50'))[0].amount, 1.5);
+  assert.strictEqual(parseLedgerCsv(amountCsv('"1,234.50"'))[0].amount, 1234.5);
+  assert.strictEqual(parseLedgerCsv(amountCsv(''))[0].amount, 0);
+});
+
+test('parseLedgerCsv throws on an unparseable amount, naming the field and line', () => {
+  assert.throws(() => parseLedgerCsv(amountCsv('abc')), /bad amount on line 2: abc/);
+});

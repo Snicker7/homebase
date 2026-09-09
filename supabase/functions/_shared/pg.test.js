@@ -3,6 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert';
 import postgres from 'postgres';
 import { runAction, loadSnapshot } from './pg.js';
+import { createService } from './service.js';
 
 const DB_URL = process.env.DB_URL;
 
@@ -56,6 +57,50 @@ test('runAction loads a snapshot, applies the journal, and is serialized', { ski
     // a throwing action rolls back
     await assert.rejects(runAction(sql, (store) => { store.setSetting('x', 1); throw new Error('nope'); }), /nope/);
     assert.strictEqual((await loadSnapshot(sql)).settings.x, undefined);
+  } finally {
+    await sql.end();
+  }
+});
+
+// The store and engine are covered in memory elsewhere; this one proves the
+// whole stack round-trips through real Postgres — journal out, snapshot back.
+test('a service action round-trips through Postgres', { skip: !DB_URL && 'set DB_URL' }, async () => {
+  const sql = postgres(DB_URL);
+  const svc = (store) => createService({
+    store,
+    now: () => new Date('2026-09-08T16:00:00Z'),
+    mail: { send: async () => {} },
+    dashboardUrl: 'https://x/',
+    secret: 's',
+  });
+  try {
+    await sql`delete from ledger`;
+    await sql`delete from habit_state`;
+    await sql`delete from chore_state`;
+    await sql`delete from settings`;
+    await sql`delete from categories`;
+    await sql`insert into people (email, name) values ('ann@x.com', 'Ann'), ('bo@x.com', 'Bo') on conflict do nothing`;
+
+    const saved = await runAction(sql, (store) => svc(store).route({
+      action: 'saveCategory',
+      user: 'ann@x.com',
+      category: JSON.stringify({ name: 'Bedtime', cadence: 'daily', rewardIncrement: 0.25, maxPerInstance: 5, freezesPerPeriod: 1 }),
+    }));
+    assert.ok(saved.ok, saved.error);
+
+    const rec = await runAction(sql, (store) => svc(store).route({
+      action: 'record', user: 'ann@x.com', categoryId: 'bedtime', result: 'on_time',
+    }));
+    assert.ok(rec.ok, rec.error);
+    assert.strictEqual(rec.wallet, 0.25);
+
+    const state = await runAction(sql, (store) => svc(store).route({ action: 'state', user: 'ann@x.com' }));
+    assert.strictEqual(state.wallet, 0.25);
+    assert.strictEqual(state.cats[0].streak, 1);
+    assert.strictEqual(state.ledger[0].type, 'entry');
+    assert.strictEqual(state.ledger[0].balanceAfter, 0.25);
+    assert.strictEqual(typeof state.ledger[0].timestamp, 'string');
+    assert.ok(state.ledger[0].timestamp.length > 0);
   } finally {
     await sql.end();
   }

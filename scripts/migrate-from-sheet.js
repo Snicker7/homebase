@@ -82,13 +82,25 @@ function parseStamp(v) {
   return new Date(guess.getTime() - off2);
 }
 
+// Sheets exports a currency-formatted cell as "$1.50" or "1,234.50", and
+// `Number(x) || 0` turns any of those — and any typo — into a silent 0 that
+// only shows up as a wrong wallet. Strip the formatting, refuse the rest.
+function money(cell, field, lineNo) {
+  const s = String(cell == null ? '' : cell).trim().replace(/[$,]/g, '');
+  if (s === '') return field === 'balanceAfter' ? '' : 0;
+  const n = Number(s);
+  if (!Number.isFinite(n)) throw new Error('bad ' + field + ' on line ' + lineNo + ': ' + cell);
+  return n;
+}
+
 export function parseLedgerCsv(text) {
   const [header, ...lines] = parseCsv(text);
   const idx = Object.fromEntries(header.map((h, i) => [h.trim(), i]));
   for (const k of ['id', 'timestamp', 'type', 'category', 'periodKey', 'result', 'freezeUsed', 'amount', 'balanceAfter', 'actor', 'note']) {
     if (!(k in idx)) throw new Error('ledger.csv missing column ' + k);
   }
-  return lines.map((r) => ({
+  return lines.map((r, i) => ({
+    // +2: the header is line 1 and `lines` starts at line 2.
     id: r[idx.id].trim(),
     timestamp: parseStamp(r[idx.timestamp]),
     type: r[idx.type].trim(),
@@ -96,8 +108,8 @@ export function parseLedgerCsv(text) {
     periodKey: fixPeriodKey((r[idx.periodKey] || '').trim()),
     result: (r[idx.result] || '').trim(),
     freezeUsed: /^true$/i.test((r[idx.freezeUsed] || '').trim()),
-    amount: Number(r[idx.amount]) || 0,
-    balanceAfter: r[idx.balanceAfter] === '' ? '' : Number(r[idx.balanceAfter]) || 0,
+    amount: money(r[idx.amount], 'amount', i + 2),
+    balanceAfter: money(r[idx.balanceAfter], 'balanceAfter', i + 2),
     actor: (r[idx.actor] || '').trim().toLowerCase(),
     note: r[idx.note] || '',
   }));
@@ -127,7 +139,26 @@ async function main() {
 
   const actors = [...new Set(rows.map((r) => r.actor))];
   console.log(`ledger rows: ${rows.length}, categories: ${journal[0].list.length}, states: ${journal.filter((e) => e.op === 'habitState').length}, chore states: ${journal.filter((e) => e.op === 'choreState').length}`);
-  for (const a of actors) console.log(`wallet ${a}: ${E.deriveWallet(rows, a).toFixed(2)}`);
+  // `loadSnapshot` reads the ledger back ordered by (ts, id), which is not
+  // necessarily the CSV's order. Compare the wallet each order derives before
+  // touching the database, so an import that would settle differently the
+  // moment it is read back never happens.
+  const sorted = [...rows].sort(
+    (a, b) => a.timestamp.getTime() - b.timestamp.getTime() || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0),
+  );
+  const orderDiffs = [];
+  for (const a of actors) {
+    const csvWallet = E.deriveWallet(rows, a).toFixed(2);
+    const readWallet = E.deriveWallet(sorted, a).toFixed(2);
+    console.log(`wallet ${a}: csv order ${csvWallet}, read-back order ${readWallet}`);
+    if (csvWallet !== readWallet) orderDiffs.push(`${a}: csv ${csvWallet} vs read-back ${readWallet}`);
+  }
+  if (orderDiffs.length) {
+    console.error('row order changes the wallet: ' + orderDiffs.join('; '));
+    console.error('The ledger stores no sequence column, so rows sharing a timestamp come back in (ts, id) order, not CSV order.');
+    console.error('Fix the source rows — give the same-second rows distinct timestamps — and re-export before importing.');
+    process.exit(1);
+  }
 
   const sql = postgres(db);
   try {

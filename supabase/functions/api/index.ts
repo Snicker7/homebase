@@ -24,6 +24,9 @@ Deno.serve(async (req) => {
 
   let p: Record<string, unknown> = {};
   try { p = await req.json(); } catch { /* empty body is fine */ }
+  // A JSON scalar or array body parses fine but isn't a payload; assigning
+  // `user` onto it would throw outside the try.
+  if (!p || typeof p !== 'object' || Array.isArray(p)) p = {};
   p.user = data.user.email.toLowerCase();
 
   try {
