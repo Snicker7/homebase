@@ -9,3 +9,9 @@ insert into public.holidays (day) values
   ('2027-01-01'), ('2027-05-31'), ('2027-07-05'), ('2027-09-06'),
   ('2027-11-25'), ('2027-11-26'), ('2027-12-24'), ('2027-12-25')
 on conflict do nothing;
+
+insert into public.budget_categories (id, name, emoji, kind, wallet_owner) values
+  ('wallet-sam', 'Sam''s wallet', '🌱', 'wallet', 'snic9004@gmail.com'),
+  ('wallet-sierra', 'Sierra''s wallet', '🌱', 'wallet', 'sierra.author@gmail.com'),
+  ('transfer', 'Transfer', '🔁', 'transfer', null)
+on conflict do nothing;
