@@ -84,12 +84,21 @@ export async function applyJournal(sql, journal) {
 
 // One action, one transaction, serialized across all callers by an advisory
 // lock so two simultaneous requests can't double-record or clobber saves.
-export async function runAction(sql, fn) {
+// `marks`, when given, collects phase timestamps (ms) so callers can report
+// where a slow request spent its time.
+export async function runAction(sql, fn, marks) {
+  const mark = (k) => { if (marks) marks[k] = Date.now(); };
+  mark('begin');
   return sql.begin(async (tx) => {
+    mark('connected');
     await tx`select pg_advisory_xact_lock(${LOCK_KEY})`;
+    mark('locked');
     const store = createStore(await loadSnapshot(tx));
+    mark('loaded');
     const result = await fn(store);
+    mark('acted');
     await applyJournal(tx, store.journal());
+    mark('applied');
     return result;
   });
 }

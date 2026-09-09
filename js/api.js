@@ -23,6 +23,10 @@ async function post(name, body, token) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
+        // Run the function next to the database: every request opens a
+        // connection and makes three round trips, and cross-region each one
+        // costs about 100 ms.
+        'x-region': 'us-west-1',
         apikey: cfg.SUPABASE_ANON_KEY,
         Authorization: 'Bearer ' + (token || cfg.SUPABASE_ANON_KEY),
       },

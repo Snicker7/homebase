@@ -105,7 +105,9 @@ export function parseLedgerCsv(text) {
     // +2: the header is line 1 and `lines` starts at line 2.
     id: r[idx.id].trim(),
     timestamp: parseStamp(r[idx.timestamp]),
-    type: r[idx.type].trim(),
+    // Pre-July rows call the unused-freeze payout weekly_bonus; the engine
+    // has written it as bonus since, and the ledger check constraint agrees.
+    type: r[idx.type].trim() === 'weekly_bonus' ? 'bonus' : r[idx.type].trim(),
     category: (r[idx.category] || '').trim(),
     periodKey: fixPeriodKey((r[idx.periodKey] || '').trim()),
     result: (r[idx.result] || '').trim(),
