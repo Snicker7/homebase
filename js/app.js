@@ -345,6 +345,9 @@ async function showDashboard(keepBanner) {
     if (!r.ok) {
       if (/authoriz/i.test(r.error || '')) {
         await signOut();
+        // Otherwise the next person on a shared browser sees this person's
+        // name, wallet, and ledger notes until the first round trip lands.
+        try { localStorage.removeItem('hb_state'); } catch { /* ignore */ }
         SIGNED_IN = false;
         setView('login');
         banner('Your session expired — please log in again.', true);
@@ -643,6 +646,7 @@ function wire() {
 
   $('logoutBtn').addEventListener('click', async () => {
     await signOut();
+    try { localStorage.removeItem('hb_state'); } catch { /* ignore */ }
     SIGNED_IN = false;
     setView('login');
     banner('Logged out.', false);
