@@ -6,3 +6,4 @@ supabase/.branches/
 scripts/data/
 .superpowers/
 !.env.example
+resend.txt
