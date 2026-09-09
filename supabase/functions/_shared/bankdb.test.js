@@ -18,6 +18,9 @@ test('bankdb: link, sync, categorize, remember', { skip: !DB_URL && 'set DB_URL'
 
     const vaultId = await db.storeAccessToken(sql, 'item-1', 'access-sandbox-abc');
     assert.strictEqual(await db.readAccessToken(sql, vaultId), 'access-sandbox-abc');
+    const vaultId2 = await db.storeAccessToken(sql, 'item-1', 'access-sandbox-second');
+    assert.notStrictEqual(vaultId2, vaultId);
+    assert.strictEqual(await db.readAccessToken(sql, vaultId2), 'access-sandbox-second');
     await db.insertItem(sql, { id: 'item-1', institution: 'First Bank', accessTokenId: vaultId, linkedBy: 'ann@x.com' });
     const items = await db.listItems(sql);
     assert.strictEqual(items.length, 1);

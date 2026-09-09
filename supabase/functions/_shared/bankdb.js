@@ -2,7 +2,7 @@
 // here decides anything, it just reads and writes rows.
 
 export async function storeAccessToken(sql, itemId, token) {
-  const [row] = await sql`select vault.create_secret(${token}, ${'plaid:' + itemId}) as id`;
+  const [row] = await sql`select vault.create_secret(${token}, ${'plaid:' + itemId + ':' + Date.now()}) as id`;
   return row.id;
 }
 
