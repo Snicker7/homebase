@@ -28,6 +28,8 @@ Deno.serve(async (req) => {
   // Cron calls sync with the dispatch secret; everything else needs a person.
   const auth = req.headers.get('Authorization') || '';
   let user = '';
+  // Plaid's client_user_id: the auth uuid, so no email reaches Plaid.
+  let userId = '';
   if (auth === 'Bearer ' + env.dispatchSecret) {
     if (action !== 'sync') return json({ ok: false, error: 'forbidden' }, 403, cors);
   } else {
@@ -35,6 +37,7 @@ Deno.serve(async (req) => {
     const { data, error } = await supa.auth.getUser();
     if (error || !data?.user?.email) return json({ ok: false, error: 'not authorized — please log in again' }, 401, cors);
     user = data.user.email.toLowerCase();
+    userId = data.user.id;
   }
 
   // Checked after auth so an unconfigured deployment cannot be probed anonymously.
@@ -48,7 +51,7 @@ Deno.serve(async (req) => {
         if (!item) return json({ ok: false, error: 'unknown bank' }, 404, cors);
         accessToken = await db.readAccessToken(sql, item.access_token_id);
       }
-      const linkToken = await plaid.linkToken({ userId: user, accessToken });
+      const linkToken = await plaid.linkToken({ userId, accessToken });
       return json({ ok: true, linkToken }, 200, cors);
     }
     if (action === 'exchange') {

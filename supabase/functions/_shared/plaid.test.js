@@ -12,23 +12,26 @@ function fakeFetch(status, body) {
   return { fetchImpl, calls };
 }
 const creds = { clientId: 'cid', secret: 'sec', env: 'sandbox' };
+// Plaid asks that client_user_id carry no personal data, so the app sends the
+// auth user's uuid rather than their email.
+const UID = '9f1c3b7e-2d4a-4c8e-9b71-5a0e6f2d8c31';
 
 test('linkToken posts credentials, the user, and transactions product', async () => {
   const { fetchImpl, calls } = fakeFetch(200, { link_token: 'link-sandbox-1' });
   const plaid = createPlaid({ ...creds, fetchImpl });
-  assert.strictEqual(await plaid.linkToken({ userId: 'ann@x.com' }), 'link-sandbox-1');
+  assert.strictEqual(await plaid.linkToken({ userId: UID }), 'link-sandbox-1');
   assert.strictEqual(calls[0].url, 'https://sandbox.plaid.com/link/token/create');
   const b = calls[0].body;
   assert.strictEqual(b.client_id, 'cid');
   assert.strictEqual(b.secret, 'sec');
-  assert.deepStrictEqual(b.user, { client_user_id: 'ann@x.com' });
+  assert.deepStrictEqual(b.user, { client_user_id: UID });
   assert.deepStrictEqual(b.products, ['transactions']);
   assert.deepStrictEqual(b.country_codes, ['US']);
 });
 
 test('linkToken in update mode sends the access token and no products', async () => {
   const { fetchImpl, calls } = fakeFetch(200, { link_token: 'link-update' });
-  await createPlaid({ ...creds, fetchImpl }).linkToken({ userId: 'ann@x.com', accessToken: 'access-1' });
+  await createPlaid({ ...creds, fetchImpl }).linkToken({ userId: UID, accessToken: 'access-1' });
   assert.strictEqual(calls[0].body.access_token, 'access-1');
   assert.strictEqual(calls[0].body.products, undefined);
 });
@@ -76,4 +79,11 @@ test('every login-fixable Plaid code maps to login_required, the rest to error',
     assert.strictEqual(itemStatusFor({ code }), 'error', code);
   }
   assert.strictEqual(itemStatusFor(null), 'error');
+});
+
+test('linkToken refuses an id that looks like an email', async () => {
+  const { fetchImpl, calls } = fakeFetch(200, { link_token: 'link-1' });
+  const plaid = createPlaid({ ...creds, fetchImpl });
+  await assert.rejects(plaid.linkToken({ userId: 'ann@x.com' }), /client_user_id/);
+  assert.strictEqual(calls.length, 0, 'nothing is sent to Plaid');
 });

@@ -47,7 +47,12 @@ export function createPlaid({ clientId, secret, env, fetchImpl }) {
   return {
     // Update mode (accessToken given) re-authenticates an existing item: no
     // products, so the Trial plan's item count does not move.
+    // `userId` becomes Plaid's client_user_id, which their docs require to
+    // carry no personal data — send the auth uuid, never an email.
     async linkToken({ userId, accessToken }) {
+      if (!userId || /@/.test(String(userId))) {
+        throw new Error('client_user_id must be an opaque id, not an email');
+      }
       const body = {
         user: { client_user_id: userId },
         client_name: 'Homebase',
