@@ -89,6 +89,13 @@ export async function failSync(sql, itemId, status, message) {
   await sql`update plaid_items set status = ${status}, error = ${String(message || '').slice(0, 500)} where id = ${itemId}`;
 }
 
+// Which category own-account moves get filed into. Looked up by kind rather
+// than a hardcoded id, and null when the household has no transfer bucket.
+export async function transferCategoryId(sql) {
+  const [row] = await sql`select id from budget_categories where kind = 'transfer' order by id limit 1`;
+  return row ? row.id : null;
+}
+
 export async function loadRules(sql) {
   return sql`select id, pattern, category_id, priority from category_rules order by priority, id`;
 }

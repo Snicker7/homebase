@@ -16,6 +16,8 @@ const dateLabel = (d) => {
 };
 // Plaid's detailed category reads like GENERAL_MERCHANDISE_SUPERSTORES.
 const hint = (c) => (c ? c.toLowerCase().replace(/_/g, ' ') : '');
+const catById = (id) => CATS.find((c) => c.id === id);
+const catLabel = (c) => (c.emoji ? c.emoji + ' ' : '') + c.name;
 
 async function loadCategories() {
   const { data, error } = await sb.from('budget_categories').select('id,name,emoji,kind').order('name');
@@ -37,41 +39,156 @@ export async function refreshInboxCount() {
 }
 
 /* ── the category picker ─────────────────────────────────────────────────── */
-// One select beats a chip per category: the list keeps growing, and a row of
-// forty buttons is unusable on a phone.
+// A searchable panel rather than a native select: the list keeps growing, and
+// a phone renders a select as an OS wheel that cannot be typed into. One panel
+// element moves to whichever row is open, so a hundred rows cost one panel.
 const GROUPS = [
   { kind: 'spend', label: 'Spending' },
   { kind: 'income', label: 'Income' },
   { kind: 'wallet', label: 'Wallets' },
   { kind: 'transfer', label: 'Transfers' },
 ];
-const NEW_VALUE = '__new';
 
-function pickerOptions(selected) {
-  let html = '<option value="">Choose a category…</option>';
-  GROUPS.forEach((g) => {
-    const list = CATS.filter((c) => c.kind === g.kind);
-    if (!list.length) return;
-    html += '<optgroup label="' + esc(g.label) + '">' +
-      list.map((c) => '<option value="' + esc(c.id) + '"' + (c.id === selected ? ' selected' : '') + '>' +
-        esc((c.emoji ? c.emoji + ' ' : '') + c.name) + '</option>').join('') +
-      '</optgroup>';
+let panel = null;
+let openRow = null; // { el, tx, field, busy }
+
+function buildPanel() {
+  panel = document.createElement('div');
+  panel.className = 'cat-panel';
+  panel.hidden = true;
+  panel.innerHTML =
+    '<input type="search" class="cat-search" placeholder="Search categories…" autocomplete="off" />' +
+    '<div class="cat-results"></div>';
+  const search = panel.querySelector('.cat-search');
+  search.addEventListener('input', () => renderResults());
+  search.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Escape') { ev.preventDefault(); closePicker(); return; }
+    if (ev.key !== 'Enter') return;
+    ev.preventDefault();
+    // Enter takes the top match, or creates what was typed when nothing matches.
+    const first = panel.querySelector('.cat-results button');
+    if (first) first.click();
   });
-  return html + '<option value="' + NEW_VALUE + '">＋ New category…</option>';
+  $('inboxView').appendChild(panel);
 }
 
-// Adding a category must not throw away what every other row has selected.
-function refreshAllPickers() {
-  $('inboxList').querySelectorAll('select.tx-cat').forEach((sel) => {
-    const keep = sel.value === NEW_VALUE ? '' : sel.value;
-    sel.innerHTML = pickerOptions(keep);
-    sel.value = keep;
-  });
+const matches = (query) => {
+  const q = query.trim().toLowerCase();
+  return q ? CATS.filter((c) => c.name.toLowerCase().includes(q)) : CATS;
+};
+
+function renderResults() {
+  const query = panel.querySelector('.cat-search').value;
+  const found = matches(query);
+  const box = panel.querySelector('.cat-results');
+  if (!found.length) {
+    const name = query.trim();
+    box.innerHTML = '<p class="cat-none">No category matches.</p>' +
+      (name
+        ? '<div class="row cat-create"><button type="button" data-create>＋ Create "' + esc(name) + '"</button>' +
+          '<select data-kind><option value="spend">Spending</option><option value="income">Income</option></select></div>'
+        : '');
+    const make = box.querySelector('[data-create]');
+    if (make) make.addEventListener('click', () => createAndFile(name, box.querySelector('[data-kind]').value));
+    return;
+  }
+  // Grouped while browsing; a flat ranked list once a query narrows it.
+  box.innerHTML = query.trim()
+    ? found.map(resultBtn).join('')
+    : GROUPS.map((g) => {
+      const list = found.filter((c) => c.kind === g.kind);
+      return list.length ? '<p class="cat-group">' + esc(g.label) + '</p>' + list.map(resultBtn).join('') : '';
+    }).join('');
+  box.querySelectorAll('button[data-pick]').forEach((b) =>
+    b.addEventListener('click', () => file(b.getAttribute('data-pick'))));
+}
+
+function resultBtn(c) {
+  const on = openRow && openRow.tx.category_id === c.id;
+  return '<button type="button" data-pick="' + esc(c.id) + '"' + (on ? ' class="cat-on"' : '') + '>' +
+    esc(catLabel(c)) + (on ? ' ✓' : '') + '</button>';
+}
+
+function openPicker(ctx) {
+  if (!panel) buildPanel();
+  if (openRow && openRow.el === ctx.el) { closePicker(); return; }
+  openRow = ctx;
+  ctx.el.querySelector('.tx-pick').appendChild(panel);
+  panel.hidden = false;
+  ctx.field.setAttribute('aria-expanded', 'true');
+  panel.querySelector('.cat-search').value = '';
+  renderResults();
+  panel.querySelector('.cat-search').focus({ preventScroll: true });
+}
+
+// The panel always returns to the view before hiding: a filed row gets removed
+// from the page, and the panel must not go with it.
+function closePicker() {
+  if (!panel) return;
+  panel.hidden = true;
+  if (openRow) openRow.field.setAttribute('aria-expanded', 'false');
+  $('inboxView').appendChild(panel);
+  openRow = null;
+}
+
+document.addEventListener('click', (ev) => {
+  if (!openRow || !panel || panel.hidden) return;
+  if (panel.contains(ev.target) || openRow.field.contains(ev.target)) return;
+  closePicker();
+});
+
+/* ── filing ──────────────────────────────────────────────────────────────── */
+async function file(categoryId) {
+  const ctx = openRow;
+  if (!ctx) return;
+  const { el, tx, field } = ctx;
+  const err = (m) => { const e = el.querySelector('.inline-err'); e.textContent = m; e.hidden = !m; };
+  err('');
+  closePicker();
+  field.disabled = true;
+  try {
+    const r = await api('categorize', { id: tx.id, categoryId, remember: el.querySelector('[data-remember]').checked });
+    if (!r.ok) { err(r.error); return; }
+    await refreshInboxCount();
+    if (r.rule) banner('Filed, and "' + r.rule.pattern + '" will file itself next time.', false);
+    if (MODE === 'filed') {
+      // Reassignment: the row stays put so the change is visible.
+      tx.category_id = categoryId;
+      field.textContent = fieldLabel(tx);
+      const n = el.querySelector('.tx-note');
+      n.textContent = 'Moved.';
+      n.hidden = false;
+    } else {
+      el.classList.add('tx-done');
+      setTimeout(() => {
+        el.remove();
+        if (!$('inboxList').children.length) $('inboxEmpty').hidden = false;
+      }, 250);
+    }
+  } catch (e) { err(e.message); } finally { field.disabled = false; }
+}
+
+async function createAndFile(name, kind) {
+  const ctx = openRow;
+  if (!ctx) return;
+  const err = (m) => { const e = ctx.el.querySelector('.inline-err'); e.textContent = m; e.hidden = !m; };
+  try {
+    const r = await api('addBudgetCategory', { name, kind });
+    if (!r.ok) { err(r.error); closePicker(); return; }
+    await loadCategories();
+    await file(r.category.id);
+  } catch (e) { err(e.message); closePicker(); }
 }
 
 /* ── rendering ───────────────────────────────────────────────────────────── */
+const fieldLabel = (tx) => {
+  const c = tx.category_id && catById(tx.category_id);
+  return c ? catLabel(c) : 'Choose a category…';
+};
+
 export async function renderInbox() {
   const list = $('inboxList');
+  closePicker();
   list.innerHTML = '<p class="muted">Loading…</p>';
   $('inboxTabNew').className = MODE === 'unfiled' ? 'seg-on' : 'ghost';
   $('inboxTabFiled').className = MODE === 'filed' ? 'seg-on' : 'ghost';
@@ -89,6 +206,7 @@ export async function renderInbox() {
     empty.hidden = data.length > 0;
     empty.textContent = MODE === 'filed' ? 'Nothing filed yet.' : 'Nothing to sort. 🎉';
     data.forEach((t) => list.appendChild(row(t)));
+    if ($('inboxSearch').value.trim()) applyMerchantFilter();
     await refreshInboxCount();
   } catch (err) {
     list.innerHTML = '';
@@ -96,87 +214,54 @@ export async function renderInbox() {
   }
 }
 
-function row(t) {
+function row(tx) {
   const el = document.createElement('div');
   el.className = 'tx';
-  const acct = ACCOUNTS[t.account_id];
+  el.dataset.merchant = String(tx.merchant || '').toLowerCase();
+  const acct = ACCOUNTS[tx.account_id];
   el.innerHTML =
     '<div class="tx-head">' +
-    '<div class="tx-main"><span class="tx-merchant">' + esc(t.merchant || '(no merchant)') + '</span>' +
-    '<span class="tx-sub">' + esc(dateLabel(t.date)) + (acct ? ' · ' + esc(acct.name) + (acct.mask ? ' ' + esc(acct.mask) : '') : '') +
-    (t.pending ? ' · pending' : '') + '</span></div>' +
-    '<span class="tx-amt ' + (t.amount < 0 ? 'plus' : '') + '">' + (t.amount < 0 ? '+' : '') + money(Math.abs(t.amount)) + '</span>' +
+    '<div class="tx-main"><span class="tx-merchant">' + esc(tx.merchant || '(no merchant)') + '</span>' +
+    '<span class="tx-sub">' + esc(dateLabel(tx.date)) + (acct ? ' · ' + esc(acct.name) + (acct.mask ? ' ' + esc(acct.mask) : '') : '') +
+    (tx.pending ? ' · pending' : '') + '</span></div>' +
+    '<span class="tx-amt ' + (tx.amount < 0 ? 'plus' : '') + '">' + (tx.amount < 0 ? '+' : '') + money(Math.abs(tx.amount)) + '</span>' +
     '</div>' +
-    (t.plaid_category && !t.category_id ? '<p class="tx-hint">Plaid says: ' + esc(hint(t.plaid_category)) + '</p>' : '') +
-    '<div class="row tx-pick"><select class="tx-cat">' + pickerOptions(t.category_id) + '</select></div>' +
+    (tx.plaid_category && !tx.category_id ? '<p class="tx-hint">Plaid says: ' + esc(hint(tx.plaid_category)) + '</p>' : '') +
+    '<div class="tx-pick"><button type="button" class="cat-field" aria-expanded="false"></button></div>' +
     '<label class="check"><input type="checkbox" data-remember /> Remember this merchant</label>' +
-    '<div class="new-cat" hidden>' +
-    '<input type="text" data-new-name placeholder="Category name" maxlength="40" />' +
-    '<select data-new-kind><option value="spend">Spending</option><option value="income">Income</option></select>' +
-    '<button type="button" data-new-save>Add</button></div>' +
     '<p class="tx-note" hidden></p>' +
     '<p class="inline-err" hidden></p>';
-
-  const err = (m) => { const e = el.querySelector('.inline-err'); e.textContent = m; e.hidden = !m; };
-  const note = (m) => { const n = el.querySelector('.tx-note'); n.textContent = m; n.hidden = !m; };
-  const sel = el.querySelector('select.tx-cat');
-  const box = el.querySelector('.new-cat');
-  const busy = (on) => el.querySelectorAll('select, button, input').forEach((x) => { x.disabled = on; });
-
-  sel.addEventListener('change', async () => {
-    err('');
-    if (sel.value === NEW_VALUE) {
-      box.hidden = false;
-      box.querySelector('input').focus();
-      return;
-    }
-    box.hidden = true;
-    if (!sel.value) return;
-    busy(true);
-    try {
-      const r = await api('categorize', { id: t.id, categoryId: sel.value, remember: el.querySelector('[data-remember]').checked });
-      if (!r.ok) { err(r.error); return; }
-      await refreshInboxCount();
-      if (r.rule) banner('Filed, and "' + r.rule.pattern + '" will file itself next time.', false);
-      if (MODE === 'filed') {
-        // Reassignment: the row stays put so the change is visible.
-        t.category_id = sel.value;
-        note('Moved.');
-      } else {
-        el.classList.add('tx-done');
-        setTimeout(() => {
-          el.remove();
-          if (!$('inboxList').children.length) $('inboxEmpty').hidden = false;
-        }, 250);
-      }
-    } catch (e) { err(e.message); } finally { busy(false); }
-  });
-
-  el.querySelector('[data-new-save]').addEventListener('click', async () => {
-    const name = el.querySelector('[data-new-name]').value.trim();
-    const kind = el.querySelector('[data-new-kind]').value;
-    if (!name) { err('Give the category a name.'); return; }
-    busy(true);
-    try {
-      const r = await api('addBudgetCategory', { name, kind });
-      if (!r.ok) { err(r.error); return; }
-      await loadCategories();
-      refreshAllPickers();
-      box.hidden = true;
-      el.querySelector('[data-new-name]').value = '';
-      // Select what was just created so one more tap is not needed.
-      sel.value = r.category.id;
-      sel.dispatchEvent(new Event('change'));
-    } catch (e) { err(e.message); } finally { busy(false); }
-  });
+  const field = el.querySelector('.cat-field');
+  field.textContent = fieldLabel(tx);
+  field.addEventListener('click', () => openPicker({ el, tx, field }));
   return el;
+}
+
+// Hiding rows beats refetching: the query is capped at 100 and the whole set
+// is already in the page.
+function applyMerchantFilter() {
+  const q = $('inboxSearch').value.trim().toLowerCase();
+  const rows = [...$('inboxList').children];
+  if (!rows.length) return;
+  // A hidden row would take the open picker with it.
+  closePicker();
+  let shown = 0;
+  rows.forEach((el) => {
+    const hit = !q || (el.dataset.merchant || '').includes(q);
+    el.hidden = !hit;
+    if (hit) shown++;
+  });
+  const empty = $('inboxEmpty');
+  empty.hidden = shown > 0;
+  if (!shown) empty.textContent = 'No merchant matches "' + q + '".';
 }
 
 let tabsWired = false;
 export function wireInboxTabs() {
   if (tabsWired) return;
   tabsWired = true;
-  const go = (mode) => { MODE = mode; renderInbox(); };
+  const go = (mode) => { MODE = mode; $('inboxSearch').value = ''; renderInbox(); };
   $('inboxTabNew').addEventListener('click', () => go('unfiled'));
   $('inboxTabFiled').addEventListener('click', () => go('filed'));
+  $('inboxSearch').addEventListener('input', applyMerchantFilter);
 }

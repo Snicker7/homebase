@@ -45,14 +45,30 @@ export function accountRow(a, itemId, asOf) {
   };
 }
 
-export function planSync(pages, rules) {
+// Plaid names a handful of categories that can only be money moving between
+// the household's own accounts, so those file themselves and never reach the
+// inbox. Deliberately narrow: a car payment or a mortgage is a real expense,
+// and a cash advance is borrowing, so all of those still want a human.
+const OWN_ACCOUNT_MOVES = new Set([
+  'LOAN_PAYMENTS_CREDIT_CARD_PAYMENT',
+  'TRANSFER_IN_ACCOUNT_TRANSFER',
+  'TRANSFER_OUT_ACCOUNT_TRANSFER',
+  'TRANSFER_IN_SAVINGS',
+  'TRANSFER_OUT_SAVINGS',
+]);
+
+/** @param opts.transferId  the transfer-kind category to file own-account moves into, if one exists. */
+export function planSync(pages, rules, opts) {
   const inserts = [];
   const updates = [];
   const removals = [];
   for (const page of pages) {
     for (const t of page.added || []) {
       const row = txnRow(t);
-      const cat = matchRule(row.merchant, rules);
+      // A merchant rule the household wrote beats Plaid's own labelling.
+      const transferId = (opts || {}).transferId;
+      const cat = matchRule(row.merchant, rules) ||
+        (transferId && OWN_ACCOUNT_MOVES.has(row.plaid_category) ? transferId : null);
       inserts.push({ ...row, category_id: cat, categorized_by: cat ? 'rule' : null });
     }
     for (const t of page.modified || []) updates.push(txnRow(t));

@@ -78,6 +78,9 @@ test('bankdb: link, sync, categorize, remember', { skip: !DB_URL && 'set DB_URL'
     assert.strictEqual(rules.length, 1);
     assert.strictEqual(rules[0].pattern, 'Costco');
 
+    // The transfer bucket the sync uses to file card payments on its own.
+    assert.strictEqual(await db.transferCategoryId(sql), 'transfer');
+
     await db.failSync(sql, 'item-1', 'login_required', 'the login details of this item have changed');
     assert.strictEqual((await db.listItems(sql, 'item-1'))[0].status, 'login_required');
   } finally {

@@ -171,6 +171,7 @@ h2 {
 /* controls (inputs + selects share one inset look) */
 input[type="email"],
 input[type="text"],
+input[type="search"],
 input[type="number"],
 input[type="date"],
 textarea,
@@ -920,7 +921,11 @@ button.ghost { flex: 0 0 auto; }
 /* inbox: the mode toggle and the per-row picker */
 .seg {
   gap: 8px;
-  margin: 0 0 6px;
+  margin: 0 0 8px;
+}
+#inboxSearch {
+  width: 100%;
+  margin: 0 0 4px;
 }
 .seg > button {
   flex: 1;
@@ -935,13 +940,89 @@ button.seg-on {
 .tx-pick {
   margin: 10px 0 0;
 }
-.tx-pick select {
-  flex: 1 1 auto;
+/* looks like the select it replaces, but opens a searchable panel */
+.cat-field {
+  width: 100%;
+  text-align: left;
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  font-weight: 500;
+  padding-right: 38px;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%239aa3d6' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 12px center;
+}
+.cat-field:hover {
+  filter: none;
+  border-color: var(--accent);
+}
+.cat-panel {
+  margin: 8px 0 0;
+  padding: 10px;
+  border-radius: 12px;
+  background: var(--bg2);
+  border: 1px solid var(--line);
+  box-shadow: var(--shadow);
+}
+.cat-panel .cat-search {
   width: 100%;
 }
-.new-cat select {
+.cat-results {
+  max-height: 46vh;
+  overflow-y: auto;
+  margin-top: 8px;
+}
+.cat-results button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  min-height: 46px;
+  margin: 2px 0;
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+}
+.cat-results button:hover {
+  filter: none;
+  background: var(--line-soft);
+}
+.cat-results button.cat-on {
+  color: var(--ok);
+}
+.cat-group {
+  margin: 10px 2px 2px;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.cat-group:first-child {
+  margin-top: 2px;
+}
+.cat-none {
+  margin: 8px 2px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+.cat-create {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 8px;
+  margin: 0;
+}
+.cat-create > button {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.cat-create > select {
   flex: 0 0 auto;
   width: auto;
+  padding-right: 34px;
 }
 .tx-note {
   margin: 6px 0 0;
@@ -952,4 +1033,14 @@ button.seg-on {
   button.seg-on {
     color: #fff;
   }
+}
+
+/* the search boxes are ours to style, not the browser's */
+input[type="search"] {
+  appearance: none;
+  -webkit-appearance: none;
+}
+input[type="search"]::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  appearance: none;
 }

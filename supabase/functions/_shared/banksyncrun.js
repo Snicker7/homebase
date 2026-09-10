@@ -24,8 +24,8 @@ export function makeSyncItem({ sql, plaid, db, now = () => new Date() }) {
         cursor = page.next_cursor;
         if (!page.has_more) break;
       }
-      const rules = await db.loadRules(sql);
-      const plan = planSync(pages, rules);
+      const [rules, transferId] = await Promise.all([db.loadRules(sql), db.transferCategoryId(sql)]);
+      const plan = planSync(pages, rules, { transferId });
       // transactions.account_id references accounts, so a fresh link would
       // otherwise fail its first sync: balances land before rows.
       const accounts = await plaid.accounts(token);

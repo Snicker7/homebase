@@ -17,6 +17,7 @@ function fakeDb() {
     calls,
     async readAccessToken() { calls.push(['readAccessToken']); return 'access-1'; },
     async loadRules() { calls.push(['loadRules']); return []; },
+    async transferCategoryId() { return 'transfer'; },
     async upsertAccounts(_sql, rows) { calls.push(['upsertAccounts', rows]); },
     async applySync(_sql, itemId, plan, cursor) { calls.push(['applySync', itemId, plan, cursor]); },
     async failSync(_sql, itemId, status, message) { calls.push(['failSync', itemId, status, message]); },

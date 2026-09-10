@@ -62,3 +62,32 @@ test('planSync: added rows get a rule category, modified rows never carry one, r
   assert.deepStrictEqual(Object.keys(plan.updates[0]).sort(), ['account_id', 'amount', 'date', 'id', 'merchant', 'pending', 'plaid_category']);
   assert.deepStrictEqual(plan.removals, ['tx4']);
 });
+
+
+/* ── transfers Plaid can name for us ───────────────────────────────────── */
+const pfc = (detailed) => ({ ...T, transaction_id: 'x1', personal_finance_category: { primary: detailed.split('_')[0], detailed } });
+
+test('planSync: a credit card payment files itself as a transfer', () => {
+  const plan = planSync([{ added: [pfc('LOAN_PAYMENTS_CREDIT_CARD_PAYMENT')], modified: [], removed: [] }], [], { transferId: 'transfer' });
+  assert.strictEqual(plan.inserts[0].category_id, 'transfer');
+  assert.strictEqual(plan.inserts[0].categorized_by, 'rule');
+});
+
+test('planSync: account and savings transfers file themselves too, both directions', () => {
+  const codes = ['TRANSFER_OUT_ACCOUNT_TRANSFER', 'TRANSFER_IN_ACCOUNT_TRANSFER', 'TRANSFER_OUT_SAVINGS', 'TRANSFER_IN_SAVINGS'];
+  const plan = planSync([{ added: codes.map(pfc), modified: [], removed: [] }], [], { transferId: 'transfer' });
+  assert.deepStrictEqual(plan.inserts.map((r) => r.category_id), codes.map(() => 'transfer'));
+});
+
+test('planSync: a real expense Plaid happens to file under loans is left alone', () => {
+  const plan = planSync([{ added: [pfc('LOAN_PAYMENTS_CAR_PAYMENT'), pfc('TRANSFER_IN_CASH_ADVANCES_AND_LOANS')], modified: [], removed: [] }], [], { transferId: 'transfer' });
+  assert.deepStrictEqual(plan.inserts.map((r) => r.category_id), [null, null]);
+});
+
+test('planSync: a merchant rule beats the transfer default, and no transfer category means no guess', () => {
+  const row = pfc('LOAN_PAYMENTS_CREDIT_CARD_PAYMENT');
+  const ruled = planSync([{ added: [row], modified: [], removed: [] }], [{ id: 1, pattern: 'netflix', category_id: 'fun', priority: 100 }], { transferId: 'transfer' });
+  assert.strictEqual(ruled.inserts[0].category_id, 'fun');
+  const bare = planSync([{ added: [row], modified: [], removed: [] }], [], {});
+  assert.strictEqual(bare.inserts[0].category_id, null);
+});
