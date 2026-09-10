@@ -102,11 +102,6 @@ let SIGNED_IN = false;
 function render(r) {
   $('whoami').textContent = r.name || r.user || '';
   setWallet(r.wallet);
-  // Card spending filed to this person's wallet is not a ledger row, so say so.
-  const sub = $('walletSub');
-  const card = Number(r.cardSpend) || 0;
-  sub.hidden = !card;
-  if (card) sub.textContent = (card > 0 ? 'includes ' + money(-card) : 'includes ' + money(-card) + ' refunded') + ' from your cards';
   $('manageBtn').hidden = false;
   renderPartner(r.partner);
   renderCatCards(r.cats || []);
@@ -450,6 +445,9 @@ function renderChorePause(wrap, pauseUntil) {
 function describe(e) {
   const cat = e.categoryName || e.category;
   if (e.type === 'spend') return { icon: '🛒', text: e.note || 'Spent', sub: '' };
+  // A card transaction filed to this person's wallet. Undone by re-filing it
+  // in the inbox, which is why the row carries no remove button.
+  if (e.type === 'card') return { icon: '💳', text: e.merchant || 'Card purchase', sub: 'from your card' };
   if (e.type === 'deposit') return { icon: '💵', text: e.note || 'Added money', sub: '' };
   if (e.type === 'bonus') return { icon: '🎁', text: e.note || 'Bonus', sub: cat || '' };
   if (e.type === 'claim') return { icon: '🧹', text: 'Did it', sub: cat || '' };
@@ -463,8 +461,11 @@ function describe(e) {
 }
 function amountCell(e) {
   const n = Number(e.amount) || 0;
-  if (e.type === 'spend' || n < 0) return { text: '−' + money(Math.abs(n)), cls: 'minus' };
-  if (n > 0) return { text: '+' + money(n), cls: 'plus' };
+  // A spend and a card row both carry a positive amount that leaves the wallet,
+  // so flip them: a negative card amount is a refund and reads as a credit.
+  const v = (e.type === 'spend' || e.type === 'card') ? -n : n;
+  if (v > 0) return { text: '+' + money(v), cls: 'plus' };
+  if (v < 0) return { text: '−' + money(-v), cls: 'minus' };
   return { text: '', cls: 'zero' };
 }
 function renderLedger(rows) {

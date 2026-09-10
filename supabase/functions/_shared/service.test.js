@@ -412,12 +412,13 @@ test('digest: fires at the configured hour, and per-chore reminder hours no long
 /* ── wallet debits from tagged card spending ───────────────────────────── */
 // A transaction filed to a person's wallet category is money already spent, so
 // the dashboard's wallet must show it even though it is not a ledger row.
-const PAID = (actor, spent) => ({ actor, spent });
+let cardSeq = 0;
+const PAID = (actor, spent) => ({ actor, id: 'tx' + (++cardSeq), date: '2026-09-02', amount: spent, merchant: 'Corner Store' });
 
 test('state: a transaction tagged to my wallet comes off my wallet, not my partner\'s', () => {
   const { ctx } = makeCtx({
     ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
-    walletSpend: [PAID(ANN, 4.25)],
+    walletTxns: [PAID(ANN, 4.25)],
   });
   const r = createService(ctx).route({ action: 'state', user: ANN });
   assert.strictEqual(r.wallet, 5.75);
@@ -428,7 +429,7 @@ test('state: a transaction tagged to my wallet comes off my wallet, not my partn
 test('state: a refund tagged to my wallet adds back', () => {
   const { ctx } = makeCtx({
     ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
-    walletSpend: [PAID(ANN, -2.5)],
+    walletTxns: [PAID(ANN, -2.5)],
   });
   const r = createService(ctx).route({ action: 'state', user: ANN });
   assert.strictEqual(r.wallet, 12.5);
@@ -437,7 +438,7 @@ test('state: a refund tagged to my wallet adds back', () => {
 
 test('state: tagged spending can take a wallet negative and reports zero when untagged', () => {
   const base = { ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 3, balanceAfter: 3, actor: ANN, note: '' }] };
-  const over = createService(makeCtx({ ...base, walletSpend: [PAID(ANN, 8)] }).ctx).route({ action: 'state', user: ANN });
+  const over = createService(makeCtx({ ...base, walletTxns: [PAID(ANN, 8)] }).ctx).route({ action: 'state', user: ANN });
   assert.strictEqual(over.wallet, -5);
   const none = createService(makeCtx(base).ctx).route({ action: 'state', user: ANN });
   assert.strictEqual(none.wallet, 3);
@@ -447,10 +448,38 @@ test('state: tagged spending can take a wallet negative and reports zero when un
 test('spend: the manual form still works off the ledger, leaving the card figure alone', () => {
   const { ctx } = makeCtx({
     ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
-    walletSpend: [PAID(ANN, 4)],
+    walletTxns: [PAID(ANN, 4)],
   });
   const svc = createService(ctx);
   // The ledger row records a ledger balance of 8; the dashboard nets the card spend off it.
   assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 2 }).wallet, 8);
   assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, 4);
+});
+
+
+test('state: card rows sit in the feed, subtract, and cannot be deleted from there', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
+    walletTxns: [{ actor: ANN, id: 'tx9', date: '2026-09-02', amount: 4.25, merchant: 'Corner Store' }],
+  });
+  const r = createService(ctx).route({ action: 'state', user: ANN });
+  const card = r.ledger.find((e) => e.type === 'card');
+  assert.ok(card, 'the card row is in the feed');
+  assert.strictEqual(card.merchant, 'Corner Store');
+  assert.strictEqual(card.amount, 4.25);
+  assert.strictEqual(card.canDelete, false);
+  // The column ends where the tile does.
+  assert.strictEqual(r.ledger[0].balanceAfter, r.wallet);
+  assert.strictEqual(r.wallet, 5.75);
+});
+
+test('state: within a day the habit entry comes before the card row', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-02T20:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-09-01', result: 'on_time', freezeUsed: false, amount: 2, balanceAfter: 2, actor: ANN, note: '' }],
+    walletTxns: [{ actor: ANN, id: 'tx9', date: '2026-09-02', amount: 1, merchant: 'Corner Store' }],
+  });
+  const r = createService(ctx).route({ action: 'state', user: ANN });
+  // Newest first, so the card row leads and the entry follows.
+  assert.deepStrictEqual(r.ledger.map((e) => e.type), ['card', 'entry']);
+  assert.deepStrictEqual(r.ledger.map((e) => e.balanceAfter), [1, 2]);
 });

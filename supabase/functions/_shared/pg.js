@@ -11,12 +11,14 @@ export async function loadSnapshot(sql) {
     sql`select category, state from chore_state`,
     sql`select key, value from settings`,
     sql`select to_char(day, 'YYYY-MM-DD') as day from holidays`,
-    // Card spending filed to a person's wallet category. One row per person.
-    sql`select bc.wallet_owner as actor, coalesce(sum(t.amount), 0) as spent
+    // Card transactions filed to a person's wallet: rows, so the activity feed
+    // can list each one and re-derive the running balance across both sources.
+    sql`select t.id, to_char(t.date, 'YYYY-MM-DD') as date, t.amount, t.merchant,
+               bc.wallet_owner as actor
           from transactions t
           join budget_categories bc on bc.id = t.category_id
          where bc.kind = 'wallet' and t.removed_at is null
-         group by bc.wallet_owner`,
+         order by t.date, t.id`,
   ]);
   return {
     people,
@@ -30,7 +32,9 @@ export async function loadSnapshot(sql) {
     choreStates: chores.map((r) => ({ category: r.category, state: r.state })),
     settings: Object.fromEntries(settings.map((r) => [r.key, r.value])),
     holidays: holidays.map((r) => r.day),
-    walletSpend: walletSpend.map((r) => ({ actor: r.actor, spent: Number(r.spent) })),
+    walletTxns: walletSpend.map((r) => ({
+      actor: r.actor, id: r.id, date: r.date, amount: Number(r.amount), merchant: r.merchant,
+    })),
   };
 }
 

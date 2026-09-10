@@ -277,6 +277,37 @@ export function createService(ctx) {
   // `mine` is one actor's rows from runningBalanceRows — already carrying the
   // correct balanceAfter. Taking them pre-scanned keeps stateResponse to a single
   // pass for the wallet and the panel together.
+  // The wallet's real history is the habits ledger plus the card transactions
+  // filed to that person's wallet. The stored balance_after knows nothing about
+  // the card side, so the column is re-derived across the merged series and
+  // lands exactly on the figure the dashboard shows.
+  function mergedWalletRows(ledgerRows, cardRows) {
+    const keyed = [];
+    ledgerRows.forEach(function (r, i) {
+      keyed.push({ day: tzDate(r.timestamp), tier: 0, i: i, row: r });
+    });
+    cardRows.forEach(function (c, i) {
+      // Midday UTC keeps the calendar day intact once formatted in TZ.
+      const ts = new Date(c.date + 'T12:00:00Z');
+      keyed.push({ day: tzDate(ts), tier: 1, i: i, row: {
+        id: c.id, timestamp: ts, type: 'card', category: '', periodKey: '', result: '',
+        freezeUsed: false, amount: c.amount, merchant: c.merchant, note: '', actor: '',
+      } });
+    });
+    keyed.sort(function (a, b) {
+      if (a.day !== b.day) return a.day < b.day ? -1 : 1;
+      return a.tier - b.tier || a.i - b.i;
+    });
+    let bal = 0;
+    return keyed.map(function (k) {
+      const r = k.row;
+      const out = Object.assign({}, r);
+      bal = (r.type === 'spend' || r.type === 'card') ? E.round2(bal - r.amount) : E.round2(bal + r.amount);
+      out.balanceAfter = bal;
+      return out;
+    });
+  }
+
   function recentLedger(mine, n) {
     mine = mine.slice(Math.max(0, mine.length - n));
     const names = categoryNames();
@@ -284,7 +315,9 @@ export function createService(ctx) {
       return {
         id: r.id,
         // Deleting an entry row replays the habit's history, so any own row goes.
+        // A card row is undone by re-filing the transaction in the inbox.
         canDelete: r.type === 'spend' || r.type === 'deposit' || r.type === 'entry' || r.type === 'claim',
+        merchant: r.merchant || '',
         timestamp: formatTimestamp(r.timestamp),
         type: r.type, category: r.category,
         categoryName: names[r.category] || r.category,
@@ -412,7 +445,7 @@ export function createService(ctx) {
       cardSpend: store.walletSpend(email),
       cats: cats,
       chores: chores,
-      ledger: recentLedger(myRows, 20),
+      ledger: recentLedger(mergedWalletRows(myRows, store.walletTxns(email)), 20),
     };
     const pe = store.partnerOf(email);
     if (pe) resp.partner = { name: store.displayName(pe), wallet: E.round2(E.deriveWallet(rows, pe) - store.walletSpend(pe)) };

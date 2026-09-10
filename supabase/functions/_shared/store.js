@@ -32,17 +32,22 @@ export function createStore(snapshot) {
   for (const r of snapshot.choreStates || []) chores[r.category] = clone(r.state);
   const settings = clone(snapshot.settings || {});
   const holidays = new Set(snapshot.holidays || []);
-  // Bank transactions filed to a person's wallet category, summed per person.
-  // Plaid's sign: positive is money out, so a refund lowers the total.
-  const cardSpend = {};
-  for (const r of snapshot.walletSpend || []) {
-    cardSpend[String(r.actor || '').toLowerCase()] = Number(r.spent) || 0;
+  // Bank transactions filed to a person's wallet category, kept as rows so the
+  // activity feed can show each one. Plaid's sign: positive is money out.
+  const cardRows = {};
+  for (const r of snapshot.walletTxns || []) {
+    const who = String(r.actor || '').toLowerCase();
+    (cardRows[who] ||= []).push({
+      id: r.id, date: String(r.date), amount: Number(r.amount) || 0, merchant: r.merchant || '',
+    });
   }
   const journal = [];
 
   return {
     allowlist: () => people.map((p) => p.email),
-    walletSpend: (email) => cardSpend[String(email || '').toLowerCase()] || 0,
+    walletTxns: (email) => clone(cardRows[String(email || '').toLowerCase()] || []),
+    walletSpend: (email) =>
+      (cardRows[String(email || '').toLowerCase()] || []).reduce((sum, r) => sum + r.amount, 0),
     displayName(email) {
       const p = people.find((x) => x.email === String(email || '').toLowerCase());
       return p ? p.name : String(email || '').split('@')[0];

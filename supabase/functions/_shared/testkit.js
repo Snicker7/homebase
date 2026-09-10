@@ -26,7 +26,7 @@ export function makeCtx(opts = {}) {
     choreStates: opts.choreStates || [],
     settings: opts.settings || {},
     holidays: opts.holidays || [],
-    walletSpend: opts.walletSpend || [],
+    walletTxns: opts.walletTxns || [],
   });
   const sent = [];
   // Default clock: Tuesday 2026-09-08 10:00 Denver time (16:00Z).
