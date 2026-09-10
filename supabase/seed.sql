@@ -13,5 +13,6 @@ on conflict do nothing;
 insert into public.budget_categories (id, name, emoji, kind, wallet_owner) values
   ('wallet-sam', 'Sam''s wallet', '🌱', 'wallet', 'snic9004@gmail.com'),
   ('wallet-sierra', 'Sierra''s wallet', '🌱', 'wallet', 'sierra.author@gmail.com'),
-  ('transfer', 'Transfer', '🔁', 'transfer', null)
+  ('transfer', 'Transfer', '🔁', 'transfer', null),
+  ('income', 'Income', '💵', 'income', null)
 on conflict do nothing;

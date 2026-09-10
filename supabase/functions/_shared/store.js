@@ -32,10 +32,17 @@ export function createStore(snapshot) {
   for (const r of snapshot.choreStates || []) chores[r.category] = clone(r.state);
   const settings = clone(snapshot.settings || {});
   const holidays = new Set(snapshot.holidays || []);
+  // Bank transactions filed to a person's wallet category, summed per person.
+  // Plaid's sign: positive is money out, so a refund lowers the total.
+  const cardSpend = {};
+  for (const r of snapshot.walletSpend || []) {
+    cardSpend[String(r.actor || '').toLowerCase()] = Number(r.spent) || 0;
+  }
   const journal = [];
 
   return {
     allowlist: () => people.map((p) => p.email),
+    walletSpend: (email) => cardSpend[String(email || '').toLowerCase()] || 0,
     displayName(email) {
       const p = people.find((x) => x.email === String(email || '').toLowerCase());
       return p ? p.name : String(email || '').split('@')[0];

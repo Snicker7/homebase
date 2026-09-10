@@ -407,3 +407,50 @@ test('digest: fires at the configured hour, and per-chore reminder hours no long
   await createService(evening.ctx).dispatch();
   assert.strictEqual(evening.sent.length, 0);
 });
+
+
+/* ── wallet debits from tagged card spending ───────────────────────────── */
+// A transaction filed to a person's wallet category is money already spent, so
+// the dashboard's wallet must show it even though it is not a ledger row.
+const PAID = (actor, spent) => ({ actor, spent });
+
+test('state: a transaction tagged to my wallet comes off my wallet, not my partner\'s', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
+    walletSpend: [PAID(ANN, 4.25)],
+  });
+  const r = createService(ctx).route({ action: 'state', user: ANN });
+  assert.strictEqual(r.wallet, 5.75);
+  assert.strictEqual(r.cardSpend, 4.25);
+  assert.strictEqual(r.partner.wallet, 0);
+});
+
+test('state: a refund tagged to my wallet adds back', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
+    walletSpend: [PAID(ANN, -2.5)],
+  });
+  const r = createService(ctx).route({ action: 'state', user: ANN });
+  assert.strictEqual(r.wallet, 12.5);
+  assert.strictEqual(r.cardSpend, -2.5);
+});
+
+test('state: tagged spending can take a wallet negative and reports zero when untagged', () => {
+  const base = { ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 3, balanceAfter: 3, actor: ANN, note: '' }] };
+  const over = createService(makeCtx({ ...base, walletSpend: [PAID(ANN, 8)] }).ctx).route({ action: 'state', user: ANN });
+  assert.strictEqual(over.wallet, -5);
+  const none = createService(makeCtx(base).ctx).route({ action: 'state', user: ANN });
+  assert.strictEqual(none.wallet, 3);
+  assert.strictEqual(none.cardSpend, 0);
+});
+
+test('spend: the manual form still works off the ledger, leaving the card figure alone', () => {
+  const { ctx } = makeCtx({
+    ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
+    walletSpend: [PAID(ANN, 4)],
+  });
+  const svc = createService(ctx);
+  // The ledger row records a ledger balance of 8; the dashboard nets the card spend off it.
+  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 2 }).wallet, 8);
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, 4);
+});

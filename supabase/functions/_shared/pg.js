@@ -3,7 +3,7 @@ import { createStore } from './store.js';
 const LOCK_KEY = 7461;
 
 export async function loadSnapshot(sql) {
-  const [people, cats, ledger, habit, chores, settings, holidays] = await Promise.all([
+  const [people, cats, ledger, habit, chores, settings, holidays, walletSpend] = await Promise.all([
     sql`select email, name from people order by email`,
     sql`select config from categories order by id`,
     sql`select id, ts, type, category, period_key, result, freeze_used, amount, balance_after, actor, note from ledger order by ts, id`,
@@ -11,6 +11,12 @@ export async function loadSnapshot(sql) {
     sql`select category, state from chore_state`,
     sql`select key, value from settings`,
     sql`select to_char(day, 'YYYY-MM-DD') as day from holidays`,
+    // Card spending filed to a person's wallet category. One row per person.
+    sql`select bc.wallet_owner as actor, coalesce(sum(t.amount), 0) as spent
+          from transactions t
+          join budget_categories bc on bc.id = t.category_id
+         where bc.kind = 'wallet' and t.removed_at is null
+         group by bc.wallet_owner`,
   ]);
   return {
     people,
@@ -24,6 +30,7 @@ export async function loadSnapshot(sql) {
     choreStates: chores.map((r) => ({ category: r.category, state: r.state })),
     settings: Object.fromEntries(settings.map((r) => [r.key, r.value])),
     holidays: holidays.map((r) => r.day),
+    walletSpend: walletSpend.map((r) => ({ actor: r.actor, spent: Number(r.spent) })),
   };
 }
 

@@ -406,13 +406,16 @@ export function createService(ctx) {
     const resp = {
       ok: true, user: email, name: store.displayName(email),
       pauseUntil: chorePauseUntil(),
-      wallet: myRows.length ? myRows[myRows.length - 1].balanceAfter : 0,
+      // The ledger is the habits side; card spending filed to this person's
+      // wallet is money already gone, so the figure on screen is the net.
+      wallet: E.round2((myRows.length ? myRows[myRows.length - 1].balanceAfter : 0) - store.walletSpend(email)),
+      cardSpend: store.walletSpend(email),
       cats: cats,
       chores: chores,
       ledger: recentLedger(myRows, 20),
     };
     const pe = store.partnerOf(email);
-    if (pe) resp.partner = { name: store.displayName(pe), wallet: E.deriveWallet(rows, pe) };
+    if (pe) resp.partner = { name: store.displayName(pe), wallet: E.round2(E.deriveWallet(rows, pe) - store.walletSpend(pe)) };
     return resp;
   }
 

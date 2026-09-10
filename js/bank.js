@@ -19,6 +19,13 @@ function loadLink() {
   return linkLoaded;
 }
 
+// Plaid reports a credit card or loan balance as the amount owed, a positive
+// number, so those accounts count against the total rather than toward it.
+const LIABILITY = new Set(['credit', 'loan']);
+const isDebt = (a) => LIABILITY.has(String(a.type || '').toLowerCase());
+// What this account contributes to net worth.
+const signed = (a) => (a.current_balance == null ? 0 : (isDebt(a) ? -1 : 1) * Number(a.current_balance));
+
 const msg = (text, isError) => { const m = $('bankMsg'); m.textContent = text; m.hidden = !text; m.style.color = isError ? 'var(--danger)' : ''; };
 const when = (iso) => (iso ? new Date(iso).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }) : 'never');
 
@@ -31,25 +38,34 @@ export async function renderAccounts(keepMsg) {
   try {
     const [items, accounts] = await Promise.all([
       sb.from('bank_items').select('id,institution,status,error,last_synced_at').order('institution'),
-      sb.from('accounts').select('id,item_id,name,subtype,mask,current_balance,balance_as_of').order('name'),
+      sb.from('accounts').select('id,item_id,name,type,subtype,mask,current_balance,balance_as_of').order('name'),
     ]);
     if (items.error) throw new Error(items.error.message);
     if (accounts.error) throw new Error(accounts.error.message);
     list.innerHTML = '';
     if (!items.data.length) list.innerHTML = '<p class="muted">No banks linked yet.</p>';
     items.data.forEach((it) => list.appendChild(itemCard(it, accounts.data.filter((a) => a.item_id === it.id))));
-    const total = accounts.data.reduce((s, a) => s + (Number(a.current_balance) || 0), 0);
-    if (accounts.data.length) {
-      const p = document.createElement('p');
-      p.className = 'bank-total';
-      p.innerHTML = 'Net across accounts: <b>' + money(total) + '</b>';
-      list.appendChild(p);
-    }
+    if (accounts.data.length) list.appendChild(totals(accounts.data));
   } catch (err) {
     list.innerHTML = '';
     banner(err.message, true);
   }
   wireButtons();
+}
+
+// Cash, owed, and net. The breakdown only appears when something is owed,
+// so a cash-only setup keeps the single line it had.
+function totals(accounts) {
+  const cash = accounts.filter((a) => !isDebt(a)).reduce((s, a) => s + signed(a), 0);
+  const owed = accounts.filter(isDebt).reduce((s, a) => s + Number(a.current_balance || 0), 0);
+  const p = document.createElement('p');
+  p.className = 'bank-total';
+  p.innerHTML = owed > 0
+    ? '<span>Cash <b>' + money(cash) + '</b></span>' +
+      '<span>Owed <b class="owed">' + money(-owed) + '</b></span>' +
+      '<span>Net <b>' + money(cash - owed) + '</b></span>'
+    : '<span>Net across accounts <b>' + money(cash) + '</b></span>';
+  return p;
 }
 
 function itemCard(it, accounts) {
@@ -64,7 +80,8 @@ function itemCard(it, accounts) {
     status +
     accounts.map((a) =>
       '<div class="acct"><span>' + esc(a.name) + (a.mask ? ' <span class="muted">' + esc(a.mask) + '</span>' : '') + '</span>' +
-      '<span class="acct-bal">' + (a.current_balance == null ? '—' : money(a.current_balance)) + '</span></div>').join('');
+      '<span class="acct-bal' + (isDebt(a) ? ' owed' : '') + '">' +
+      (a.current_balance == null ? '—' : money(signed(a))) + '</span></div>').join('');
   return el;
 }
 

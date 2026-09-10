@@ -884,7 +884,21 @@ button.ok-ghost {
 .bank-status { margin: 6px 0 0; color: var(--gold); font-size: 0.9rem; }
 .acct { display: flex; justify-content: space-between; padding: 6px 0 0 12px; }
 .acct-bal { font-variant-numeric: tabular-nums; font-weight: 600; }
-.bank-total { margin: 14px 0 0; text-align: right; color: var(--muted); }
+.bank-total {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 16px;
+  margin: 14px 0 0;
+  color: var(--muted);
+}
+.bank-total b {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+.owed {
+  color: var(--danger) !important;
+}
 button.ghost { flex: 0 0 auto; }
 
 /* categories screen: the dropdown row */
@@ -901,4 +915,41 @@ button.ghost { flex: 0 0 auto; }
 /* a wallet in debt */
 .stat.big.negative .value {
   color: var(--danger);
+}
+
+/* inbox: the mode toggle and the per-row picker */
+.seg {
+  gap: 8px;
+  margin: 0 0 6px;
+}
+.seg > button {
+  flex: 1;
+  min-height: 44px;
+  font-size: 15px;
+}
+button.seg-on {
+  background: var(--accent);
+  color: #0e1230;
+  border: 1px solid var(--accent);
+}
+.tx-pick {
+  margin: 10px 0 0;
+}
+.tx-pick select {
+  flex: 1 1 auto;
+  width: 100%;
+}
+.new-cat select {
+  flex: 0 0 auto;
+  width: auto;
+}
+.tx-note {
+  margin: 6px 0 0;
+  color: var(--ok);
+  font-size: 0.85rem;
+}
+@media (prefers-color-scheme: light) {
+  button.seg-on {
+    color: #fff;
+  }
 }

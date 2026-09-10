@@ -50,6 +50,7 @@
           <div class="stat big">
             <span class="label">Your wallet</span>
             <span id="wallet" class="value">$0.00</span>
+            <span id="walletSub" class="sub" hidden></span>
           </div>
         </div>
 
@@ -233,6 +234,10 @@
         <div class="row" style="justify-content:space-between">
           <h2>Inbox</h2>
           <a class="link-btn" href="#/">← Dashboard</a>
+        </div>
+        <div class="row seg">
+          <button type="button" id="inboxTabNew" class="seg-on">To sort</button>
+          <button type="button" id="inboxTabFiled" class="ghost">Filed</button>
         </div>
         <div id="inboxList"></div>
         <p id="inboxEmpty" class="muted" hidden>Nothing to sort. 🎉</p>

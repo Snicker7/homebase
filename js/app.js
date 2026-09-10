@@ -1,7 +1,7 @@
 // ES module: the browser loads this with <script type="module">.
 import { api, checkup, requestLogin, getSession, signOut, onAuthChange, configured } from './api.js';
 import { $, esc, money, banner } from './util.js';
-import { renderInbox, refreshInboxCount } from './inbox.js';
+import { renderInbox, refreshInboxCount, wireInboxTabs } from './inbox.js';
 import { renderAccounts } from './bank.js';
 
 /* ── tiny helpers ───────────────────────────────────────────────────────── */
@@ -102,6 +102,11 @@ let SIGNED_IN = false;
 function render(r) {
   $('whoami').textContent = r.name || r.user || '';
   setWallet(r.wallet);
+  // Card spending filed to this person's wallet is not a ledger row, so say so.
+  const sub = $('walletSub');
+  const card = Number(r.cardSpend) || 0;
+  sub.hidden = !card;
+  if (card) sub.textContent = (card > 0 ? 'includes ' + money(-card) : 'includes ' + money(-card) + ' refunded') + ' from your cards';
   $('manageBtn').hidden = false;
   renderPartner(r.partner);
   renderCatCards(r.cats || []);
@@ -926,6 +931,7 @@ function wire() {
     } catch (err) { banner(err.message, true); }
   });
 
+  wireInboxTabs();
   window.addEventListener('hashchange', route);
 }
 
