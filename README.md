@@ -96,6 +96,42 @@ against the local database and leaves rows behind. Run
    trigger. Log in at homebase.samnichols.dev on both phones. Leave the
    Sheet as a read-only backup.
 
+## Bank sync (phase 2)
+
+1. **Plaid keys.** dashboard.plaid.com, Team Settings, Keys. Copy the client
+   id and the Sandbox secret. Production needs the Trial plan approved under
+   Settings, Plans; until then everything below uses Sandbox.
+
+2. **Migrate.** `npx supabase db push` applies `0002_budget.sql`. Then
+   `psql "$PROD_DB_URL" -f supabase/seed.sql` adds the wallet and transfer
+   categories (it skips rows that already exist).
+
+3. **Secrets and deploy.**
+
+       npx supabase secrets set PLAID_CLIENT_ID=... PLAID_SECRET=... PLAID_ENV=sandbox
+       npx supabase functions deploy plaid --no-verify-jwt
+       npx supabase functions deploy api
+
+4. **Cron.** Run the `homebase-plaid-sync` block of `supabase/cron.sql` in the
+   SQL editor with PROJECT_REF and DISPATCH_SECRET filled in. Do not commit
+   the filled-in file.
+
+5. **Link a bank.** Banks screen, Link a bank. In Sandbox any institution
+   accepts `user_good` / `pass_good`. Transactions land in the Inbox. Plaid
+   prepares the first transaction pull in the background, which takes anywhere
+   from a few minutes to a few hours after linking, so an empty Inbox right
+   after a link is normal. Sync now fetches whatever has arrived so far; the
+   scheduled sync runs four times a day and picks up the rest.
+
+6. **Go to Production** once the Trial plan is approved: set
+   `PLAID_SECRET` to the Production secret and `PLAID_ENV=production`,
+   redeploy `plaid`, then in the SQL editor delete the sandbox rows:
+   `delete from plaid_items;` (accounts and transactions cascade),
+   `delete from vault.secrets where name like 'plaid:%';` (the sandbox access
+   tokens, which nothing points at any more), and link the real banks. Each
+   real bank uses one of the ten lifetime Trial items; a bank whose login
+   breaks is repaired with Fix login, which reuses its item.
+
 ## Verify in production
 
 After step 8 above, with the user:

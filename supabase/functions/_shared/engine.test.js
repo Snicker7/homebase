@@ -112,9 +112,9 @@ test('refresh pays nothing for a period with no entries, but still resets freeze
   assert.strictEqual(r.state.periodStart, 'P2');
 });
 
-test('spend subtracts from the wallet and floors at 0', () => {
+test('spend subtracts from the wallet and may go negative', () => {
   assert.strictEqual(E.applySpend(10, { amount: 4 }).balance, 6);
-  assert.strictEqual(E.applySpend(3, { amount: 5 }).balance, 0);
+  assert.strictEqual(E.applySpend(3, { amount: 5 }).balance, -2);
   assert.throws(() => E.applySpend(10, { amount: 0 }), /positive/);
   const ev = E.applySpend(10, { amount: 4, note: 'snack', actor: 'a' }).event;
   assert.strictEqual(ev.type, 'spend');
@@ -188,14 +188,14 @@ test('deriveWallet adds on-time entry payouts and ignores zero-amount misses', (
   assert.strictEqual(E.deriveWallet(rows, 'a'), 0.25);
 });
 
-test('deriveWallet floors a spend that exceeds the balance at $0', () => {
+test('deriveWallet lets an overspend go negative and later credits pay it back', () => {
   const rows = [
     { type: 'deposit', amount: 3, actor: 'a' },
     { type: 'spend', amount: 5, actor: 'a' },
     { type: 'deposit', amount: 2, actor: 'a' },
   ];
-  // 3 -> max(0, 3-5)=0 -> 0+2 = 2  (floor matters: without it this is 0)
-  assert.strictEqual(E.deriveWallet(rows, 'a'), 2);
+  // 3 -> 3-5 = -2 -> -2+2 = 0: the credit goes toward the debt first.
+  assert.strictEqual(E.deriveWallet(rows, 'a'), 0);
 });
 
 test('deriveWallet isolates by actor, case-insensitively', () => {
@@ -224,10 +224,11 @@ test('runningBalanceRows attaches cumulative balanceAfter for the actor only', (
   assert.strictEqual(out[1].balanceAfter, 6);
 });
 
-test('applySpend caps the logged amount at the available balance on overspend', () => {
+test('applySpend logs the full amount on overspend and the balance goes negative', () => {
   const r = E.applySpend(3, { amount: 5 });
-  assert.strictEqual(r.balance, 0);
-  assert.strictEqual(r.event.amount, 3); // logs what was actually deducted, not the requested 5
+  assert.strictEqual(r.balance, -2);
+  assert.strictEqual(r.event.amount, 5);
+  assert.strictEqual(r.event.balanceAfter, -2);
 });
 
 test('applySpend logs the full amount for a normal spend', () => {

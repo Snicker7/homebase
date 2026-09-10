@@ -123,7 +123,7 @@ test('record: a late answer for a rolled-over period is appended and replayed', 
   assert.strictEqual(r.wallet, 0.25);
 });
 
-test('spend: debits the wallet and floors at zero', () => {
+test('spend: debits the wallet and may go negative', () => {
   const { ctx } = makeCtx({
     ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 3, balanceAfter: 3, actor: ANN, note: '' }],
   });
@@ -132,7 +132,10 @@ test('spend: debits the wallet and floors at zero', () => {
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.wallet, 1.75);
   assert.strictEqual(r.event.type, 'spend');
-  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 10 }).wallet, 0);
+  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 10 }).wallet, -8.25);
+  // A later payout goes toward the debt first.
+  const paid = svc.route({ action: 'record', user: ANN, categoryId: 'bedtime', result: 'on_time' });
+  assert.strictEqual(paid.wallet, -8);
 });
 
 test('deleteEntry: removes own entry and replays; refuses partner rows', () => {

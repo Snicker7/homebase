@@ -425,3 +425,7 @@ import_map = "./functions/deno.json"
 [functions.dispatch]
 verify_jwt = false
 import_map = "./functions/deno.json"
+
+[functions.plaid]
+verify_jwt = false
+import_map = "./functions/deno.json"

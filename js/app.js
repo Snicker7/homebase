@@ -1,14 +1,10 @@
 // ES module: the browser loads this with <script type="module">.
 import { api, checkup, requestLogin, getSession, signOut, onAuthChange, configured } from './api.js';
+import { $, esc, money, banner } from './util.js';
+import { renderInbox, refreshInboxCount } from './inbox.js';
+import { renderAccounts } from './bank.js';
 
 /* ── tiny helpers ───────────────────────────────────────────────────────── */
-const $ = (id) => document.getElementById(id);
-const money = (n) => '$' + Number(n || 0).toFixed(2);
-// Every innerHTML below interpolates values the two of you typed — category
-// names (which render in each other's dashboard) and ledger notes.
-const esc = (v) =>
-  String(v == null ? '' : v).replace(/[&<>"']/g, (c) =>
-    ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 // Mirrors the backend's slugify so the UI can detect duplicate category ids.
 const slugify = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
 /* Mirrors of backend period helpers (engine.js) — keep in sync. */
@@ -49,13 +45,6 @@ const setBusy = (busy) => {
   document.querySelectorAll('#catCards button, #choreCards button, #ledger button').forEach((b) => { b.disabled = busy; });
 };
 
-function banner(msg, isError) {
-  const b = $('banner');
-  b.textContent = msg;
-  b.className = 'banner' + (isError ? ' error' : ' ok');
-  b.hidden = !msg;
-}
-
 // The wallet counts to its new value rather than jumping, so a payout reads
 // as money arriving.
 let walletShown = null; // null until the first render, which snaps
@@ -63,6 +52,7 @@ let walletAnim = 0;
 function setWallet(n) {
   const el = $('wallet');
   const to = Number(n) || 0;
+  el.closest('.stat').classList.toggle('negative', to < 0);
   const from = walletShown;
   cancelAnimationFrame(walletAnim);
   if (from === null || Math.abs(to - from) < 0.005 || matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -84,9 +74,20 @@ function setUpdating(on) {
 }
 
 function setView(name) {
-  ['loginView', 'checkinView', 'dashView', 'adminView'].forEach((v) => ($(v).hidden = true));
-  $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView' }[name]).hidden = false;
+  ['loginView', 'checkinView', 'dashView', 'adminView', 'inboxView', 'accountsView'].forEach((v) => ($(v).hidden = true));
+  $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView', inbox: 'inboxView', accounts: 'accountsView' }[name]).hidden = false;
   $('logoutBtn').hidden = !SIGNED_IN;
+  $('navInbox').hidden = !SIGNED_IN;
+  $('navAccounts').hidden = !SIGNED_IN;
+}
+
+// #/inbox and #/accounts are screens; anything else is the dashboard.
+async function route() {
+  if (!SIGNED_IN) { setView('login'); return; }
+  const h = location.hash;
+  if (h === '#/inbox') { setView('inbox'); await renderInbox(); return; }
+  if (h === '#/accounts') { setView('accounts'); await renderAccounts(); return; }
+  await showDashboard();
 }
 
 // Last-rendered category list, so the admin form can guard against duplicate ids.
@@ -107,6 +108,7 @@ function render(r) {
   PARTNER_NAME = (r.partner && r.partner.name) || 'your partner';
   renderChoreCards(r.chores || [], r.pauseUntil || '', r.user);
   renderLedger(r.ledger || []);
+  refreshInboxCount().catch(() => {});
 }
 
 function renderPartner(p) {
@@ -172,7 +174,11 @@ function renderCatCards(cats) {
     const card = document.createElement('section');
     card.className = 'card habit';
     const label = (c.emoji ? c.emoji + ' ' : '') + c.name;
-    const period = periodLabel(c.nextPeriodKey);
+    // A nightly habit is answered the morning after, keyed by the date the
+    // night began, so "yesterday" reads as "last night" on the card.
+    const nightly = c.cadence !== 'weekly';
+    const rawPeriod = periodLabel(c.nextPeriodKey);
+    const period = nightly && rawPeriod === 'Yesterday' ? 'last night' : rawPeriod;
     const freezes = Number(c.freezeAvailable) || 0;
     const recorded = c.recordedResult;
     card.innerHTML =
@@ -197,8 +203,8 @@ function renderCatCards(cats) {
       '<div class="ask" hidden><p class="ask-text"></p>' +
       '<div class="ask-btns"><button class="ghost" data-no>Cancel</button><button data-yes>Yes</button></div></div>' +
       '<p class="inline-err" hidden></p>' +
-      '<p class="hmeta">' + (c.cadence === 'weekly' ? 'Weekly' : 'Nightly') + ' · recording ' + esc(period) +
-      (c.lastRecordedKey ? ' · last ' + esc(periodLabel(c.lastRecordedKey)) : '') + '</p>' +
+      '<p class="hmeta">' + (nightly ? 'Nightly · answers for ' : 'Weekly · answers for ') + esc(period) +
+      (recorded ? ' · next opens ' + (nightly ? 'at midnight' : 'Monday') : '') + '</p>' +
       '<details class="more"><summary>More</summary>' +
       (c.notes ? '<p class="notes-text">' + esc(c.notes) + '</p>' : '') +
       '<div class="fix-past">' +
@@ -275,30 +281,50 @@ function chorePeriodLabel(c) {
 }
 
 
+// Which chore groups the person left open on this phone.
+const CHORE_GROUP_KEY = 'hb_chore_groups';
+function readGroupState() {
+  try { return JSON.parse(localStorage.getItem(CHORE_GROUP_KEY) || '{}'); } catch { return {}; }
+}
+function saveGroupState(key, open) {
+  try {
+    const st = readGroupState();
+    st[key] = open;
+    localStorage.setItem(CHORE_GROUP_KEY, JSON.stringify(st));
+  } catch { /* ignore */ }
+}
+
+const CHORE_GROUPS = [
+  { key: 'today', title: '☀️ Today', open: true },
+  { key: 'week', title: '📅 Coming up', open: false },
+  { key: 'month', title: '🗓️ Any day this month', open: false },
+  { key: 'once', title: '📌 One-time', open: false },
+];
+
 function renderChoreCards(chores, pauseUntil, me) {
   const wrap = $('choreCards');
   wrap.innerHTML = '';
   if (chores.length || pauseUntil) renderChorePause(wrap, pauseUntil);
-  // Only what needs attention today sits at the top; the rest of the week
-  // collapses, and the do-whenever chores (monthly, undated one-timers) sink.
-  const groups = { today: [], week: [], month: [] };
-  chores.forEach((c) => { (groups[c.group] || groups.today).push(c); });
-  groups.today.forEach((c) => wrap.appendChild(choreCard(c, me)));
-  if (groups.week.length) {
+  // Every group collapses. Today opens by default since it wants action;
+  // the rest open only if this phone left them open last time.
+  const groups = { today: [], week: [], month: [], once: [] };
+  chores.forEach((c) => {
+    const key = c.cadence === 'once' ? 'once' : (groups[c.group] ? c.group : 'today');
+    groups[key].push(c);
+  });
+  const remembered = readGroupState();
+  CHORE_GROUPS.forEach((g) => {
+    const list = groups[g.key];
+    if (!list.length) return;
     const det = document.createElement('details');
-    det.className = 'chore-week';
-    det.innerHTML = '<summary>📅 Coming up — ' + groups.week.length +
-      ' chore' + (groups.week.length === 1 ? '' : 's') + '</summary>';
-    groups.week.forEach((c) => det.appendChild(choreCard(c, me)));
+    det.className = 'chore-group';
+    det.open = g.key in remembered ? !!remembered[g.key] : g.open;
+    det.innerHTML = '<summary>' + g.title + ' — ' + list.length +
+      ' chore' + (list.length === 1 ? '' : 's') + '</summary>';
+    list.forEach((c) => det.appendChild(choreCard(c, me)));
+    det.addEventListener('toggle', () => saveGroupState(g.key, det.open));
     wrap.appendChild(det);
-  }
-  if (groups.month.length) {
-    const h = document.createElement('p');
-    h.className = 'muted chore-group-label';
-    h.textContent = '🗓️ Any day this month';
-    wrap.appendChild(h);
-    groups.month.forEach((c) => wrap.appendChild(choreCard(c, me)));
-  }
+  });
 }
 
 function choreCard(c, me) {
@@ -691,28 +717,43 @@ async function showAdmin() {
   } catch (err) { banner(err.message, true); }
 }
 
+// The existing categories live in one dropdown so the add form sits right
+// under the heading instead of below a table that keeps growing.
 function renderCatList(cats) {
   CAT_LIST = cats;
-  const body = $('catList').querySelector('tbody');
-  body.innerHTML = '';
-  cats.forEach((c) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML =
-      '<td>' + (c.emoji ? esc(c.emoji) + ' ' : '') + esc(c.name) +
-        (c.active ? '' : ' (archived)') + '</td>' +
-      '<td>' + esc({ biweekly: 'every 2 weeks' }[c.cadence] || c.cadence) + '</td>' +
-      '<td><button class="link-btn" data-edit="' + esc(c.id) + '">edit</button> ' +
-      (c.active
-        ? '<button class="link-btn" data-arch="' + esc(c.id) + '">archive</button>'
-        : '<button class="link-btn" data-unarch="' + esc(c.id) + '">unarchive</button>') + '</td>';
-    body.appendChild(tr);
+  const pick = $('catPick');
+  const current = pick.value;
+  const label = (c) => (c.emoji ? c.emoji + ' ' : '') + c.name + ' · ' +
+    ({ biweekly: 'every 2 weeks', once: 'one-time' }[c.cadence] || c.cadence);
+  const options = (list) => list.map((c) =>
+    '<option value="' + esc(c.id) + '">' + esc(label(c)) + '</option>').join('');
+  const active = cats.filter((c) => c.active);
+  const archived = cats.filter((c) => !c.active);
+  pick.innerHTML = '<option value="">Choose…</option>' +
+    (active.length ? '<optgroup label="Active">' + options(active) + '</optgroup>' : '') +
+    (archived.length ? '<optgroup label="Archived">' + options(archived) + '</optgroup>' : '');
+  pick.value = cats.some((c) => c.id === current) ? current : '';
+  syncArchiveBtn();
+}
+
+// Archive or unarchive follows whichever category the dropdown shows.
+function syncArchiveBtn() {
+  const btn = $('catArchiveBtn');
+  const c = CAT_LIST.find((x) => x.id === $('catPick').value);
+  btn.hidden = !c;
+  if (c) btn.textContent = c.active ? 'Archive' : 'Unarchive';
+}
+
+function wireCatPick() {
+  $('catPick').addEventListener('change', () => {
+    const c = CAT_LIST.find((x) => x.id === $('catPick').value);
+    syncArchiveBtn();
+    if (c) editCat(c); else resetCatForm();
   });
-  body.querySelectorAll('button[data-edit]').forEach((b) =>
-    b.addEventListener('click', () => editCat(cats.find((x) => x.id === b.getAttribute('data-edit')))));
-  body.querySelectorAll('button[data-arch]').forEach((b) =>
-    b.addEventListener('click', () => setCatActive(b.getAttribute('data-arch'), 'archiveCategory')));
-  body.querySelectorAll('button[data-unarch]').forEach((b) =>
-    b.addEventListener('click', () => setCatActive(b.getAttribute('data-unarch'), 'unarchiveCategory')));
+  $('catArchiveBtn').addEventListener('click', () => {
+    const c = CAT_LIST.find((x) => x.id === $('catPick').value);
+    if (c) setCatActive(c.id, c.active ? 'archiveCategory' : 'unarchiveCategory');
+  });
 }
 
 function editCat(c) {
@@ -758,6 +799,8 @@ function applyKindToForm(kind) {
 function resetCatForm() {
   $('catForm').reset();
   $('catId').value = '';
+  $('catPick').value = '';
+  syncArchiveBtn();
   $('catFormTitle').textContent = 'Add a category';
   $('cancelEditBtn').hidden = true;
   $('catFormMsg').hidden = true;
@@ -825,7 +868,14 @@ function wire() {
   });
 
   $('manageBtn').addEventListener('click', showAdmin);
-  $('backToDashBtn').addEventListener('click', () => showDashboard());
+  wireCatPick();
+  $('backToDashBtn').addEventListener('click', () => {
+    // Assigning a hash equal to the current one fires no hashchange, so
+    // after a visit to Inbox/Accounts the hash already sits at '#/' —
+    // route directly in that case instead of waiting on an event that won't fire.
+    if (location.hash && location.hash !== '#/') location.hash = '#/';
+    else showDashboard();
+  });
   $('cancelEditBtn').addEventListener('click', resetCatForm);
 
   // Remember which habit inputs are required today so applyKindToForm can
@@ -875,6 +925,8 @@ function wire() {
       banner('Category saved.', false);
     } catch (err) { banner(err.message, true); }
   });
+
+  window.addEventListener('hashchange', route);
 }
 
 /* ── boot ───────────────────────────────────────────────────────────────────*/
@@ -898,13 +950,14 @@ async function boot() {
   const session = await getSession();
   SIGNED_IN = !!session;
   // supabase-js consumes the hash during getSession() and leaves a bare '#'
-  // behind, so test the whole href rather than location.hash.
-  if (location.href.includes('#')) history.replaceState({}, '', location.origin + location.pathname);
-  if (SIGNED_IN) showDashboard(); else setView('login');
+  // behind, so test the whole href rather than location.hash. Leave an app
+  // route (#/inbox, #/accounts) alone so a deep link survives the reload.
+  if (location.href.includes('#') && !location.hash.startsWith('#/')) history.replaceState({}, '', location.origin + location.pathname);
+  await route();
   onAuthChange((s) => {
     const was = SIGNED_IN;
     SIGNED_IN = !!s;
-    if (SIGNED_IN && !was) showDashboard();
+    if (SIGNED_IN && !was) route();
   });
 }
 

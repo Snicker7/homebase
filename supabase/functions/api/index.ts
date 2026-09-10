@@ -5,6 +5,8 @@ import { corsHeaders, json } from '../_shared/cors.js';
 import { runAction } from '../_shared/pg.js';
 import { createService } from '../_shared/service.js';
 import { createResendMailer } from '../_shared/mail.js';
+import * as bank from '../_shared/bankdb.js';
+import { BANK_ACTIONS, validateCategorize, validateCategory } from '../_shared/bankactions.js';
 
 const env = readEnv();
 const sql = postgres(env.dbUrl, { max: 2, prepare: false });
@@ -40,6 +42,34 @@ Deno.serve(async (req) => {
   // `user` onto it would throw outside the try.
   if (!p || typeof p !== 'object' || Array.isArray(p)) p = {};
   p.user = data.user.email.toLowerCase();
+
+  // Bank actions carry no reward rule, so they skip the snapshot and the lock.
+  if (BANK_ACTIONS.includes(String(p.action))) {
+    try {
+      if (p.action === 'categorize') {
+        const v = validateCategorize(p);
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        const hit = await bank.categorize(sql, v);
+        if (!hit) return json({ ok: false, error: 'unknown transaction' }, 404, cors);
+        let rule = null;
+        if (v.remember && hit.merchant) {
+          await bank.addRule(sql, { pattern: hit.merchant, categoryId: v.categoryId });
+          rule = { pattern: hit.merchant, categoryId: v.categoryId };
+        }
+        return json({ ok: true, rule }, 200, cors);
+      }
+      const v = validateCategory(p);
+      if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+      await bank.addCategory(sql, v);
+      return json({ ok: true, category: v }, 200, cors);
+    } catch (e) {
+      const msg = (e as Error)?.message || String(e);
+      // Two failures are the caller's doing rather than ours; say so plainly.
+      if (/duplicate key/.test(msg)) return json({ ok: false, error: 'that category already exists' }, 500, cors);
+      if (/foreign key/.test(msg)) return json({ ok: false, error: 'unknown category' }, 400, cors);
+      return json({ ok: false, error: msg }, 500, cors);
+    }
+  }
 
   try {
     const result = await runAction(sql, (store) =>
