@@ -16,11 +16,15 @@ export function matchRule(merchant, rules) {
 /** The columns a sync is allowed to write for a transaction. Never category_id or note. */
 export function txnRow(t) {
   const pfc = t.personal_finance_category;
+  // An amount that is not a number would land in the ledger as a wrong total.
+  // Throw instead: the sync run's catch marks the item `error` and nothing applies.
+  const amount = Number(t.amount);
+  if (!Number.isFinite(amount)) throw new Error('transaction ' + t.transaction_id + ' has a non-numeric amount');
   return {
     id: t.transaction_id,
     account_id: t.account_id,
     date: t.date,
-    amount: Number(t.amount),
+    amount,
     merchant: t.merchant_name || t.name || '',
     pending: t.pending === true,
     plaid_category: pfc && pfc.detailed ? pfc.detailed : null,

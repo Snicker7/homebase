@@ -15,10 +15,20 @@ export class PlaidError extends Error {
   }
 }
 
+// Plaid codes that Link's update mode can repair: the user re-enters credentials
+// or re-grants access and the same item keeps working.
+const LOGIN_CODES = new Set([
+  'ITEM_LOGIN_REQUIRED',
+  'PENDING_EXPIRATION',
+  'ITEM_LOCKED',
+  'INSUFFICIENT_CREDENTIALS',
+  'USER_PERMISSION_REVOKED',
+]);
+
 // What an item's status becomes after a failed call. Only a login problem is
 // fixable by the user; everything else waits for the next sync or a look at the logs.
 export function itemStatusFor(err) {
-  return err && err.code === 'ITEM_LOGIN_REQUIRED' ? 'login_required' : 'error';
+  return err && LOGIN_CODES.has(err.code) ? 'login_required' : 'error';
 }
 
 export function createPlaid({ clientId, secret, env, fetchImpl }) {

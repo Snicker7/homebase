@@ -13,6 +13,9 @@ create table public.budget_categories (
 create table public.plaid_items (
   id text primary key,
   institution text not null default '',
+  -- Plaid's stable id for the bank. The Trial plan allows ten items for the
+  -- account's lifetime, so a second link to a bank already here is refused.
+  institution_id text not null default '',
   access_token_id uuid not null,
   cursor text,
   status text not null default 'ok' check (status in ('ok', 'login_required', 'error')),

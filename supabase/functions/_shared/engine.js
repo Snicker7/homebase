@@ -551,7 +551,8 @@ function applyRefresh(state, balance, cat, newPeriodStart, hadEntries) {
 function applySpend(balance, input) {
   var requested = round2(input.amount);
   if (!(requested > 0)) throw new Error('spend amount must be positive');
-  var applied = round2(Math.min(requested, Math.max(0, balance)));
+  // A wallet may go negative: every later payout pays the debt down first.
+  var applied = requested;
   var newBalance = round2(balance - applied);
   var event = {
     type: 'spend',
@@ -709,7 +710,7 @@ function runningBalanceRows(rows, actor) {
     var r = rows[i];
     if (String(r.actor || '').toLowerCase() !== a) continue;
     var amt = Number(r.amount) || 0;
-    bal = r.type === 'spend' ? round2(Math.max(0, bal - amt)) : round2(bal + amt);
+    bal = r.type === 'spend' ? round2(bal - amt) : round2(bal + amt);
     var copy = Object.assign({}, r);
     copy.balanceAfter = bal;
     out.push(copy);

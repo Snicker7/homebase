@@ -31,6 +31,13 @@ test('txnRow: prefers merchant_name, falls back to name, keeps the detailed cate
   assert.strictEqual(noMerchant.plaid_category, null);
 });
 
+test('txnRow: a non-numeric amount throws rather than writing NaN', () => {
+  assert.throws(() => txnRow({ ...T, amount: 'oops' }), /transaction tx1 has a non-numeric amount/);
+  assert.throws(() => txnRow({ ...T, amount: undefined }), /non-numeric amount/);
+  assert.strictEqual(txnRow({ ...T, amount: '42.50' }).amount, 42.5);
+  assert.strictEqual(txnRow({ ...T, amount: 0 }).amount, 0);
+});
+
 test('accountRow: flattens a Plaid account with its current balance', () => {
   const asOf = new Date('2026-09-08T16:00:00Z');
   const a = { account_id: 'acc1', name: 'Checking', official_name: 'Everyday Checking', type: 'depository', subtype: 'checking', mask: '1234', balances: { current: 1500.25, available: 1400 } };

@@ -6,17 +6,43 @@ export async function storeAccessToken(sql, itemId, token) {
   return row.id;
 }
 
+// A superseded token is deleted outright: it is dead to Plaid and Vault rows
+// are not versioned.
+export async function deleteAccessToken(sql, vaultId) {
+  if (!vaultId) return;
+  await sql`delete from vault.secrets where id = ${vaultId}`;
+}
+
 export async function readAccessToken(sql, vaultId) {
   const [row] = await sql`select decrypted_secret from vault.decrypted_secrets where id = ${vaultId}`;
   if (!row) throw new Error('access token missing from vault');
   return row.decrypted_secret;
 }
 
-export async function insertItem(sql, { id, institution, accessTokenId, linkedBy }) {
-  await sql`
-    insert into plaid_items (id, institution, access_token_id, linked_by)
-    values (${id}, ${institution || ''}, ${accessTokenId}, ${linkedBy})
-    on conflict (id) do update set institution = excluded.institution, access_token_id = excluded.access_token_id, status = 'ok', error = ''`;
+// Returns the vault id this upsert replaced, or null on a first link. The
+// `prev` branch reads the statement's snapshot, so it still sees the old row
+// after the upsert has written the new one; the caller deletes that secret.
+export async function insertItem(sql, { id, institution, institutionId, accessTokenId, linkedBy }) {
+  const rows = await sql`
+    with prev as (select access_token_id from plaid_items where id = ${id}),
+    upsert as (
+      insert into plaid_items (id, institution, institution_id, access_token_id, linked_by)
+      values (${id}, ${institution || ''}, ${institutionId || ''}, ${accessTokenId}, ${linkedBy})
+      on conflict (id) do update set institution = excluded.institution, institution_id = excluded.institution_id,
+        access_token_id = excluded.access_token_id, status = 'ok', error = ''
+    )
+    select access_token_id from prev`;
+  const previous = rows[0] ? rows[0].access_token_id : null;
+  return previous && previous !== accessTokenId ? previous : null;
+}
+
+// The duplicate-link guard: one row per bank. An empty id never matches, since
+// rows linked before institution ids were recorded carry the default ''.
+export async function findItemByInstitution(sql, institutionId) {
+  if (!institutionId) return null;
+  const [row] = await sql`
+    select id, institution, institution_id, status from plaid_items where institution_id = ${institutionId}`;
+  return row || null;
 }
 
 export async function listItems(sql, itemId) {
@@ -70,7 +96,8 @@ export async function loadRules(sql) {
 // Returns the merchant so the caller can turn it into a rule; null when the id is unknown.
 export async function categorize(sql, { id, categoryId, note }) {
   const rows = await sql`
-    update transactions set category_id = ${categoryId}, categorized_by = 'user', note = ${note || ''}
+    update transactions set category_id = ${categoryId}, categorized_by = 'user',
+      note = coalesce(nullif(${note || ''}::text, ''), note)
     where id = ${id} returning merchant`;
   return rows[0] || null;
 }

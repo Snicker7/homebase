@@ -64,8 +64,10 @@ Deno.serve(async (req) => {
       return json({ ok: true, category: v }, 200, cors);
     } catch (e) {
       const msg = (e as Error)?.message || String(e);
-      // A duplicate slug is the one expected failure; say so plainly.
-      return json({ ok: false, error: /duplicate key/.test(msg) ? 'that category already exists' : msg }, 500, cors);
+      // Two failures are the caller's doing rather than ours; say so plainly.
+      if (/duplicate key/.test(msg)) return json({ ok: false, error: 'that category already exists' }, 500, cors);
+      if (/foreign key/.test(msg)) return json({ ok: false, error: 'unknown category' }, 400, cors);
+      return json({ ok: false, error: msg }, 500, cors);
     }
   }
 

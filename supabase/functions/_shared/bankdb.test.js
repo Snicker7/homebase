@@ -21,10 +21,25 @@ test('bankdb: link, sync, categorize, remember', { skip: !DB_URL && 'set DB_URL'
     const vaultId2 = await db.storeAccessToken(sql, 'item-1', 'access-sandbox-second');
     assert.notStrictEqual(vaultId2, vaultId);
     assert.strictEqual(await db.readAccessToken(sql, vaultId2), 'access-sandbox-second');
-    await db.insertItem(sql, { id: 'item-1', institution: 'First Bank', accessTokenId: vaultId, linkedBy: 'ann@x.com' });
+    const noPrevious = await db.insertItem(sql, { id: 'item-1', institution: 'First Bank', institutionId: 'ins_1', accessTokenId: vaultId, linkedBy: 'ann@x.com' });
+    assert.strictEqual(noPrevious, null, 'a first link supersedes nothing');
     const items = await db.listItems(sql);
     assert.strictEqual(items.length, 1);
     assert.strictEqual(items[0].status, 'ok');
+
+    // The duplicate-link guard: found by Plaid's institution id, never by a blank one.
+    const dup = await db.findItemByInstitution(sql, 'ins_1');
+    assert.strictEqual(dup.id, 'item-1');
+    assert.strictEqual(await db.findItemByInstitution(sql, 'ins_other'), null);
+    assert.strictEqual(await db.findItemByInstitution(sql, ''), null);
+
+    // Re-linking the same item hands back the vault id it replaced, and deleting
+    // it leaves the new token readable and the old one gone.
+    const superseded = await db.insertItem(sql, { id: 'item-1', institution: 'First Bank', institutionId: 'ins_1', accessTokenId: vaultId2, linkedBy: 'ann@x.com' });
+    assert.strictEqual(superseded, vaultId);
+    await db.deleteAccessToken(sql, superseded);
+    assert.strictEqual((await sql`select count(*)::int as n from vault.secrets where id = ${vaultId}`)[0].n, 0);
+    assert.strictEqual(await db.readAccessToken(sql, vaultId2), 'access-sandbox-second');
 
     const asOf = new Date('2026-09-08T16:00:00Z');
     await db.upsertAccounts(sql, [{ id: 'acc1', item_id: 'item-1', name: 'Checking', type: 'depository', subtype: 'checking', mask: '1234', current_balance: 100, balance_as_of: asOf }]);
@@ -55,6 +70,9 @@ test('bankdb: link, sync, categorize, remember', { skip: !DB_URL && 'set DB_URL'
 
     const c = await db.categorize(sql, { id: 'tx1', categoryId: 'groceries', note: 'bulk' });
     assert.strictEqual(c.merchant, 'Costco');
+    // Re-categorizing without a note keeps the note already there.
+    await db.categorize(sql, { id: 'tx1', categoryId: 'groceries' });
+    assert.strictEqual((await sql`select note from transactions where id = 'tx1'`)[0].note, 'bulk');
     await db.addRule(sql, { pattern: c.merchant, categoryId: 'groceries' });
     const rules = await db.loadRules(sql);
     assert.strictEqual(rules.length, 1);

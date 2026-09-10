@@ -11,6 +11,8 @@ export const configured = () =>
   !/paste/.test(cfg.SUPABASE_ANON_KEY);
 
 const supabase = configured() ? createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY) : null;
+// Direct reads under row-level security. Writes never go this way.
+export const sb = supabase;
 const fnUrl = (name) => cfg.SUPABASE_URL.replace(/\/$/, '') + '/functions/v1/' + name;
 
 async function post(name, body, token) {
@@ -56,6 +58,13 @@ export async function api(action, extra) {
 }
 
 export const checkup = (t) => post('checkup', { t });
+
+// The plaid function: bank linking and syncing.
+export async function bank(action, extra) {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'not authorized — please log in again' };
+  return post('plaid', Object.assign({ action }, extra || {}), session.access_token);
+}
 
 export async function requestLogin(email) {
   if (!supabase) throw new Error('Backend not configured');

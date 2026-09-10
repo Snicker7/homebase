@@ -67,3 +67,13 @@ test('a Plaid error becomes a PlaidError with its code, and maps to an item stat
   });
   assert.strictEqual(itemStatusFor(new Error('network')), 'error');
 });
+
+test('every login-fixable Plaid code maps to login_required, the rest to error', () => {
+  for (const code of ['ITEM_LOGIN_REQUIRED', 'PENDING_EXPIRATION', 'ITEM_LOCKED', 'INSUFFICIENT_CREDENTIALS', 'USER_PERMISSION_REVOKED']) {
+    assert.strictEqual(itemStatusFor({ code }), 'login_required', code);
+  }
+  for (const code of ['ITEM_NOT_FOUND', 'INTERNAL_SERVER_ERROR', 'RATE_LIMIT', '']) {
+    assert.strictEqual(itemStatusFor({ code }), 'error', code);
+  }
+  assert.strictEqual(itemStatusFor(null), 'error');
+});

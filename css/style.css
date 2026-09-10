@@ -49,10 +49,22 @@ body {
 }
 .who {
   display: flex;
-  flex-direction: column;
-  align-items: flex-end;
-  gap: 2px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0 2px;
   font-size: 0.85rem;
+}
+.who > #whoami {
+  flex-basis: 100%;
+  text-align: right;
+}
+.who .link-btn {
+  font-size: 0.85rem;
+  padding: 6px 6px;
+}
+.topbar h1 {
+  white-space: nowrap;
 }
 h1 {
   font-size: 1.5rem;
@@ -490,10 +502,10 @@ textarea {
   font-size: 14px;
   white-space: pre-wrap;
 }
-.chore-week {
+.chore-group {
   margin: 0 0 14px;
 }
-.chore-week > summary {
+.chore-group > summary {
   cursor: pointer;
   font-size: 15px;
   opacity: 0.8;
@@ -811,4 +823,82 @@ button.ok-ghost {
   button.ok-ghost {
     color: #1f7a4d;
   }
+}
+
+/* nav */
+.who a.link-btn {
+  text-decoration: none;
+}
+.pill {
+  display: inline-block;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #0e1230;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: center;
+  vertical-align: 1px;
+}
+
+/* ── inbox ───────────────────────────────────────────────────────────────── */
+.tx {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--line-soft);
+  transition: opacity 0.25s ease, transform 0.25s ease;
+}
+.tx:last-child { border-bottom: none; }
+.tx-done { opacity: 0; transform: translateX(24px); }
+.tx-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+.tx-main { display: flex; flex-direction: column; min-width: 0; }
+.tx-merchant { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-sub { color: var(--muted); font-size: 0.82rem; }
+.tx-amt { font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tx-amt.plus { color: var(--ok); }
+.tx-hint { margin: 4px 0 0; color: var(--muted); font-size: 0.8rem; }
+.chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip {
+  min-height: 40px;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 15px;
+  font-weight: 600;
+  background: var(--field);
+  color: var(--ink);
+  border: 1px solid var(--line);
+}
+.chip-new { color: var(--accent); border-style: dashed; }
+.new-cat { display: flex; gap: 8px; margin-top: 8px; }
+.new-cat input { flex: 1; }
+
+/* ── banks ───────────────────────────────────────────────────────────────── */
+.bank { padding: 12px 0; border-bottom: 1px solid var(--line-soft); }
+.bank:last-of-type { border-bottom: none; }
+.bank-head { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.bank-status { margin: 6px 0 0; color: var(--gold); font-size: 0.9rem; }
+.acct { display: flex; justify-content: space-between; padding: 6px 0 0 12px; }
+.acct-bal { font-variant-numeric: tabular-nums; font-weight: 600; }
+.bank-total { margin: 14px 0 0; text-align: right; color: var(--muted); }
+button.ghost { flex: 0 0 auto; }
+
+/* categories screen: the dropdown row */
+.cat-pick {
+  margin: 4px 0 18px;
+}
+.cat-pick select {
+  flex: 1 1 160px;
+}
+.cat-pick .ghost {
+  flex: 0 0 auto;
+}
+
+/* a wallet in debt */
+.stat.big.negative .value {
+  color: var(--danger);
 }
