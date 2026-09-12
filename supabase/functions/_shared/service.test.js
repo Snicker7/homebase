@@ -445,15 +445,48 @@ test('state: tagged spending can take a wallet negative and reports zero when un
   assert.strictEqual(none.cardSpend, 0);
 });
 
-test('spend: the manual form still works off the ledger, leaving the card figure alone', () => {
-  const { ctx } = makeCtx({
+test('spend: the ledger row keeps the ledger balance, the response nets the card spend', () => {
+  const { ctx, store } = makeCtx({
     ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
     walletTxns: [PAID(ANN, 4)],
   });
   const svc = createService(ctx);
-  // The ledger row records a ledger balance of 8; the dashboard nets the card spend off it.
-  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 2 }).wallet, 8);
+  assert.strictEqual(svc.route({ action: 'spend', user: ANN, amount: 2 }).wallet, 4);
+  assert.strictEqual(store.readLedgerRows().find((x) => x.type === 'spend').balanceAfter, 8);
   assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, 4);
+});
+
+// Every figure that lands on the wallet tile must agree with the state read:
+// the check-up link from an email, a dashboard tap, a claim, a removal.
+const TEN_WITH_FOUR_ON_CARD = () => makeCtx({
+  ledger: [{ id: 'r1', timestamp: new Date('2026-09-01T03:00:00Z'), type: 'entry', category: 'bedtime', periodKey: '2026-08-31', result: 'on_time', freezeUsed: false, amount: 10, balanceAfter: 10, actor: ANN, note: '' }],
+  categories: [BEDTIME, DISHES],
+  walletTxns: [PAID(ANN, 4)],
+});
+
+test('checkup: the wallet in the reply nets card spend like the dashboard', () => {
+  const svc = createService(TEN_WITH_FOUR_ON_CARD().ctx);
+  const r = svc.checkup({ person: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'on_time', exp: 9e15 });
+  assert.strictEqual(r.event.amount, 0.25);
+  assert.strictEqual(r.wallet, 6.25);
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, 6.25);
+});
+
+test('record, claim, amend, deleteEntry: every wallet reply nets card spend', () => {
+  const svc = createService(TEN_WITH_FOUR_ON_CARD().ctx);
+  const rec = svc.route({ action: 'record', user: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'on_time' });
+  assert.strictEqual(rec.wallet, 6.25);
+  const claim = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' });
+  assert.strictEqual(claim.wallet, 8.25);
+  const same = svc.route({ action: 'amend', user: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'on_time' });
+  assert.strictEqual(same.unchanged, true);
+  assert.strictEqual(same.wallet, 8.25);
+  const amend = svc.route({ action: 'amend', user: ANN, categoryId: 'bedtime', periodKey: '2026-09-07', result: 'missed' });
+  assert.strictEqual(amend.wallet, 8);
+  const claimId = svc.route({ action: 'state', user: ANN }).ledger.find((e) => e.type === 'claim').id;
+  const del = svc.route({ action: 'deleteEntry', user: ANN, id: claimId });
+  assert.strictEqual(del.wallet, 6);
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, 6);
 });
 
 

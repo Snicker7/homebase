@@ -17,6 +17,7 @@
           <span id="whoami" class="muted"></span>
           <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
           <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
+          <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
           <button id="manageBtn" class="link-btn" hidden>Categories</button>
           <button id="logoutBtn" class="link-btn" hidden>Log out</button>
         </div>
@@ -255,6 +256,21 @@
           <button id="syncNowBtn" class="ghost">Sync now</button>
         </div>
         <p id="bankMsg" class="muted" hidden></p>
+      </section>
+
+      <!-- BUDGET: this month against the trailing average, and history -->
+      <section id="budgetView" class="card" hidden>
+        <div class="row" style="justify-content:space-between">
+          <h2>Budget</h2>
+          <a class="link-btn" href="#/">← Dashboard</a>
+        </div>
+        <div class="row seg">
+          <a id="budgetTabMonth" class="seg-on" href="#/budget">This month</a>
+          <a id="budgetTabHistory" class="ghost" href="#/budget/history">History</a>
+        </div>
+        <p id="budgetMeta" class="muted" hidden></p>
+        <div id="budgetList"></div>
+        <p id="budgetEmpty" class="muted" hidden></p>
       </section>
 
       <footer class="foot muted">Build the habit, bank the reward 🌱</footer>

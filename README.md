@@ -132,6 +132,13 @@ against the local database and leaves rows behind. Run
    real bank uses one of the ten lifetime Trial items; a bank whose login
    breaks is repaired with Fix login, which reuses its item.
 
+## Reports (phase 3)
+
+`npx supabase db push` applies `0003_reports.sql`, which adds the two views
+the Budget screen reads. No function changes; push `main` and the Budget link
+appears in the nav. The Month view compares each spending category with its
+trailing average; the History view shows twelve months of bars per category.
+
 ## Verify in production
 
 After step 8 above, with the user:
@@ -162,3 +169,4 @@ Rows in the `settings` table, editable in the SQL editor. The app writes
 | key | default | meaning |
 |---|---|---|
 | `choreDigestTime` | `08:00` | Hour (Denver, whole hour) the morning chore digest goes out. One email per person listing the chores due that day. |
+| `trailingMonths` | `6` | How many complete months the Budget screen averages over. |
