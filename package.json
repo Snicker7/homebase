@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test supabase/functions/_shared/ scripts/"
+    "test": "node --test supabase/functions/_shared/ scripts/ js/"
   },
   "devDependencies": {
     "postgres": "^3.4.5"

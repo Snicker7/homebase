@@ -205,6 +205,11 @@ export function createService(ctx) {
     });
   }
   function walletOf(email) { return E.deriveWallet(store.readLedgerRows(), email); }
+  // The ledger balance is the habits side only. Card spending filed to this
+  // person's wallet is money already gone, so every figure that reaches the
+  // wallet tile — the state read, an action reply, the check-up link's
+  // "Wallet:" line — nets it off. Ledger rows keep the ledger balance.
+  function netWallet(email, ledgerBalance) { return E.round2(ledgerBalance - store.walletSpend(email)); }
   function catStateOf(email, catId, cat) {
     const m = store.statesAll();
     if (!m[email]) m[email] = { cats: {} };
@@ -439,16 +444,14 @@ export function createService(ctx) {
     const resp = {
       ok: true, user: email, name: store.displayName(email),
       pauseUntil: chorePauseUntil(),
-      // The ledger is the habits side; card spending filed to this person's
-      // wallet is money already gone, so the figure on screen is the net.
-      wallet: E.round2((myRows.length ? myRows[myRows.length - 1].balanceAfter : 0) - store.walletSpend(email)),
+      wallet: netWallet(email, myRows.length ? myRows[myRows.length - 1].balanceAfter : 0),
       cardSpend: store.walletSpend(email),
       cats: cats,
       chores: chores,
       ledger: recentLedger(mergedWalletRows(myRows, store.walletTxns(email)), 20),
     };
     const pe = store.partnerOf(email);
-    if (pe) resp.partner = { name: store.displayName(pe), wallet: E.round2(E.deriveWallet(rows, pe) - store.walletSpend(pe)) };
+    if (pe) resp.partner = { name: store.displayName(pe), wallet: netWallet(pe, E.deriveWallet(rows, pe)) };
     return resp;
   }
 
@@ -524,7 +527,7 @@ export function createService(ctx) {
       const late = replayAndSave(person, cat, periodKey, lateId);
       const le = late.entry || {};
       return {
-        ok: true, user: person, wallet: late.wallet, cat: catPublic(person, cat),
+        ok: true, user: person, wallet: netWallet(person, late.wallet), cat: catPublic(person, cat),
         event: { type: 'entry', category: cat.id, periodKey: periodKey, result: result,
           freezeUsed: le.freezeUsed === true, amount: Number(le.amount) || 0 },
       };
@@ -533,14 +536,14 @@ export function createService(ctx) {
     const out = E.applyEntry(s, E.deriveWallet(rows, person), cat, { periodKey: periodKey, result: result, actor: person });
     store.appendLedger({ ...out.event, timestamp: ctx.now() });
     saveCatState(person, cat.id, out.state);
-    return { ok: true, user: person, wallet: out.balance, cat: catPublic(person, cat), event: out.event };
+    return { ok: true, user: person, wallet: netWallet(person, out.balance), cat: catPublic(person, cat), event: out.event };
   }
 
   function doSpend(p) {
     const email = requireUser(p);
     const out = E.applySpend(walletOf(email), { amount: Number(p.amount), note: p.note || '', actor: email });
     store.appendLedger({ ...out.event, timestamp: ctx.now() });
-    return { ok: true, wallet: out.balance, event: out.event };
+    return { ok: true, wallet: netWallet(email, out.balance), event: out.event };
   }
 
   function doDeleteEntry(p) {
@@ -565,7 +568,7 @@ export function createService(ctx) {
       store.deleteLedgerRow(match.id);
       // replayAndSave re-reads the ledger, so it sees the deletion.
       const out = replayAndSave(email, cat, match.periodKey, null);
-      return { ok: true, wallet: out.wallet, cat: catPublic(email, cat) };
+      return { ok: true, wallet: netWallet(email, out.wallet), cat: catPublic(email, cat) };
     }
     if (match.type === 'claim') {
       const ccat = categoryById(match.category);
@@ -592,7 +595,7 @@ export function createService(ctx) {
   // read. Wallets stay derived from the ledger — never cached — so the only thing
   // worth avoiding is reading the same ledger twice in one request.
   function walletWithout(rows, email, id) {
-    return E.deriveWallet(rows.filter(function (r) { return String(r.id) !== String(id); }), email);
+    return netWallet(email, E.deriveWallet(rows.filter(function (r) { return String(r.id) !== String(id); }), email));
   }
 
   // Rewrite this actor's entry rows for `cat` from `fromPeriodKey` onward to the
@@ -680,7 +683,7 @@ export function createService(ctx) {
       if (String(before[i].periodKey) === periodKey) { target = before[i]; break; }
     }
     if (target && String(target.result) === result) {
-      return { ok: true, unchanged: true, wallet: E.deriveWallet(rows, email) };
+      return { ok: true, unchanged: true, wallet: netWallet(email, E.deriveWallet(rows, email)) };
     }
     let targetId;
     if (target) {
@@ -696,7 +699,7 @@ export function createService(ctx) {
     const out = replayAndSave(email, cat, periodKey, targetId);
     const ae = out.entry || {};
     return {
-      ok: true, wallet: out.wallet, cat: catPublic(email, cat),
+      ok: true, wallet: netWallet(email, out.wallet), cat: catPublic(email, cat),
       event: { periodKey: periodKey, result: result,
         freezeUsed: ae.freezeUsed === true, amount: Number(ae.amount) || 0 },
       ripple: { entriesChanged: out.changed },
@@ -789,7 +792,7 @@ export function createService(ctx) {
       store.saveCategories(list); // done is done — the card disappears
     }
     return {
-      ok: true, wallet: wallet,
+      ok: true, wallet: netWallet(email, wallet),
       event: { periodKey: periodKey, amount: amount, pot: pot, together: together, partnerAmount: partnerAmount },
     };
   }
