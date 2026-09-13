@@ -78,6 +78,15 @@ test('a 401 fails loudly and writes nothing', async () => {
   assert.strictEqual(db.calls.length, 0, 'nothing is replaced when the fetch failed');
 });
 
+test('a 200 with no items array reports a failure and writes nothing', async () => {
+  const db = fakeDb();
+  const fetchImpl = async () => ({ ok: true, status: 200, json: async () => ({ generatedAt: '2026-09-13T00:00:00.000Z' }), text: async () => '' });
+  const res = await importFeed(null, { token: 't', today: '2026-09-13', fetchImpl, replace: db.replace });
+  assert.strictEqual(res.imported, 0);
+  assert.strictEqual(res.failures.length, 1);
+  assert.strictEqual(db.calls.length, 0, 'a malformed body must not wipe the cached window');
+});
+
 test('a malformed item is named and the rest still import', async () => {
   const db = fakeDb();
   const body = { items: [SAMPLE.items[0], { kind: 'task', title: 'no id' }] };

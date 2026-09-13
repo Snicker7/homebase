@@ -56,21 +56,28 @@ export async function importFeed(sql, { token, today, fetchImpl, replace }) {
     });
     if (!res.ok) {
       failures.push('office feed ' + res.status + (res.status === 401 ? ' — check KEEPSITE_FEED_TOKEN' : ''));
-      return { imported: 0, deleted: 0, failures };
+      return { imported: 0, failures };
     }
     body = await res.json();
   } catch (e) {
     failures.push('office feed unreachable — ' + ((e && e.message) || e));
-    return { imported: 0, deleted: 0, failures };
+    return { imported: 0, failures };
+  }
+
+  // A 200 with no items array is a broken feed, not an empty one. Treating the
+  // two alike would let one bad deploy upstream delete the whole cached window.
+  if (!body || !Array.isArray(body.items)) {
+    failures.push('office feed returned no items array');
+    return { imported: 0, failures };
   }
 
   const rows = [];
-  for (const raw of (body && body.items) || []) {
+  for (const raw of body.items) {
     const row = normalizeItem(raw);
     // One bad row must not cost the other ninety-nine.
     if (row) rows.push(row);
     else failures.push('unreadable office item: ' + JSON.stringify(raw).slice(0, 120));
   }
   await write(sql, rows, from, to);
-  return { imported: rows.length, deleted: 0, failures };
+  return { imported: rows.length, failures };
 }

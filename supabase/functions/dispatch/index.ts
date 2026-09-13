@@ -38,10 +38,17 @@ Deno.serve(async (req) => {
   // The office import is independent of the habits dispatch: a feed that is
   // down must not cost the hour its reminders.
   if (env.keepsiteFeedToken) {
-    const today = tzDate(new Date());
-    const office = await importFeed(sql, { token: env.keepsiteFeedToken, today });
-    for (const f of office.failures) { result.failures.push(f); result.ok = false; }
-    console.log('office import', JSON.stringify({ imported: office.imported, failures: office.failures.length }));
+    // A database hiccup during the import must not swallow the failures the
+    // mail loop already recorded in `result`.
+    try {
+      const today = tzDate(new Date());
+      const office = await importFeed(sql, { token: env.keepsiteFeedToken, today });
+      for (const f of office.failures) { result.failures.push(f); result.ok = false; }
+      console.log('office import', JSON.stringify({ imported: office.imported, failures: office.failures.length }));
+    } catch (e) {
+      result.failures.push('office import — ' + ((e as Error)?.message || e));
+      result.ok = false;
+    }
   }
   console.log('dispatch', JSON.stringify(result));
   // 500 on failure so the cron log shows the hour red.
