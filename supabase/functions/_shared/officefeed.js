@@ -14,6 +14,10 @@ export const feedWindow = (today) => ({ from: addDays(today, -BACK_DAYS), to: ad
 
 const isDay = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
 const orNull = (v) => (v === undefined || v === '' ? null : v);
+// The url is rendered as a link on the screen and in the email. Only the office
+// is meant to be on the other end of it, so anything else becomes no link at all.
+const OFFICE_ORIGIN = 'https://www.keepsitemedia.com/';
+const officeUrl = (v) => (typeof v === 'string' && v.startsWith(OFFICE_ORIGIN) ? v : null);
 
 export function normalizeItem(raw) {
   if (!raw || typeof raw !== 'object') return null;
@@ -38,7 +42,7 @@ export function normalizeItem(raw) {
     project: orNull(raw.project),
     repeat: orNull(raw.repeat),
     link: orNull(raw.link),
-    url: orNull(raw.url),
+    url: officeUrl(raw.url),
   };
 }
 

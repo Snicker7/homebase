@@ -96,3 +96,12 @@ test('a malformed item is named and the rest still import', async () => {
   assert.strictEqual(res.failures.length, 1);
   assert.match(res.failures[0], /unreadable/);
 });
+
+test('a url that does not point at the office becomes no link at all', () => {
+  const item = { kind: 'task', id: 't9', due: '2026-09-15', title: 'x' };
+  assert.strictEqual(normalizeItem({ ...item, url: 'https://www.keepsitemedia.com/office/tasks/' }).url,
+    'https://www.keepsitemedia.com/office/tasks/');
+  assert.strictEqual(normalizeItem({ ...item, url: 'javascript:alert(1)' }).url, null);
+  assert.strictEqual(normalizeItem({ ...item, url: 'https://keepsitemedia.com.evil.test/' }).url, null);
+  assert.strictEqual(normalizeItem({ ...item, url: 'office/tasks/' }).url, null);
+});
