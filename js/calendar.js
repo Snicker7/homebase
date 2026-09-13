@@ -295,3 +295,11 @@ $('calDelete').addEventListener('click', deleteEvent);
 $('calForm').addEventListener('submit', submitEvent);
 $('calAllDay').addEventListener('change', syncFormBits);
 $('calRepeat').addEventListener('change', syncFormBits);
+
+$('calSync').addEventListener('click', async () => {
+  $('calSync').disabled = true;
+  const res = await cal('officeRefresh', {});
+  $('calSync').disabled = false;
+  if (!res.ok) { $('calOfficeAge').hidden = false; $('calOfficeAge').textContent = res.error; return; }
+  await renderCalendar(currentView(), currentArg());
+});

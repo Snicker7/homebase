@@ -9,6 +9,8 @@ import * as bank from '../_shared/bankdb.js';
 import { BANK_ACTIONS, validateCategorize, validateCategory } from '../_shared/bankactions.js';
 import * as cal from '../_shared/caldb.js';
 import { CAL_ACTIONS, validateEvent, validateOccurrence, validateEventCategory, validateId } from '../_shared/calactions.js';
+import { importFeed } from '../_shared/officefeed.js';
+import { tzDate } from '../_shared/clock.js';
 
 const env = readEnv();
 const sql = postgres(env.dbUrl, { max: 2, prepare: false });
@@ -110,8 +112,13 @@ Deno.serve(async (req) => {
         const hit = await cal.retireCategory(sql, v.id);
         return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'that category is reserved for the office' }, 400, cors);
       }
-      // officeRefresh arrives in the import task.
-      return json({ ok: false, error: 'not built yet' }, 501, cors);
+      if (p.action === 'officeRefresh') {
+        if (!env.keepsiteFeedToken) return json({ ok: false, error: 'the office feed token is not set' }, 400, cors);
+        const today = tzDate(new Date());
+        const out = await importFeed(sql, { token: env.keepsiteFeedToken, today });
+        return json({ ok: out.failures.length === 0, imported: out.imported, error: out.failures[0] }, 200, cors);
+      }
+      return json({ ok: false, error: 'unknown action' }, 400, cors);
     } catch (e) {
       const msg = (e as Error)?.message || String(e);
       if (/foreign key/.test(msg)) return json({ ok: false, error: 'unknown category' }, 400, cors);

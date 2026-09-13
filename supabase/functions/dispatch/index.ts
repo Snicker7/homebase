@@ -4,6 +4,8 @@ import { corsHeaders, json } from '../_shared/cors.js';
 import { runAction } from '../_shared/pg.js';
 import { createService } from '../_shared/service.js';
 import { createResendMailer } from '../_shared/mail.js';
+import { importFeed } from '../_shared/officefeed.js';
+import { tzDate } from '../_shared/clock.js';
 
 const env = readEnv();
 const sql = postgres(env.dbUrl, { max: 2, prepare: false });
@@ -32,6 +34,14 @@ Deno.serve(async (req) => {
       result.failures.push('send to ' + m.to + ' — ' + ((e as Error)?.message || e));
       result.ok = false;
     }
+  }
+  // The office import is independent of the habits dispatch: a feed that is
+  // down must not cost the hour its reminders.
+  if (env.keepsiteFeedToken) {
+    const today = tzDate(new Date());
+    const office = await importFeed(sql, { token: env.keepsiteFeedToken, today });
+    for (const f of office.failures) { result.failures.push(f); result.ok = false; }
+    console.log('office import', JSON.stringify({ imported: office.imported, failures: office.failures.length }));
   }
   console.log('dispatch', JSON.stringify(result));
   // 500 on failure so the cron log shows the hour red.
