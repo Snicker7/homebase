@@ -322,6 +322,16 @@
             </div>
           </form>
         </div>
+        <details id="calCats" class="cal-cats">
+          <summary>Categories</summary>
+          <div id="calCatList"></div>
+          <form id="calCatForm" class="row">
+            <input id="calCatName" type="text" placeholder="New category" maxlength="40" required />
+            <input id="calCatColor" type="color" value="#57c785" />
+            <button type="submit" class="ghost">Add</button>
+          </form>
+          <p id="calCatError" class="cal-error" hidden></p>
+        </details>
       </section>
 
       <footer class="foot muted">Build the habit, bank the reward 🌱</footer>

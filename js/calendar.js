@@ -70,6 +70,7 @@ export async function renderCalendar(view, arg) {
   body.innerHTML = '<p class="muted">Loading…</p>';
   try {
     await loadCategories();
+    renderCatList();
     if (view === 'month') await renderMonth(body, arg || denverToday().slice(0, 7));
     else if (view === 'day') await renderDay(body, arg || denverToday());
     else await renderAgenda(body);
@@ -302,4 +303,45 @@ $('calSync').addEventListener('click', async () => {
   $('calSync').disabled = false;
   if (!res.ok) { $('calOfficeAge').hidden = false; $('calOfficeAge').textContent = res.error; return; }
   await renderCalendar(currentView(), currentArg());
+});
+
+/* ── categories ───────────────────────────────────────────────────────────── */
+// The three system rows are the importer's and cannot be retired, but their
+// colors are as editable as any other: they appear on the same calendar.
+function renderCatList() {
+  $('calCatList').innerHTML = Object.values(CATS).filter((c) => c.active).map((c) =>
+    '<div class="cal-cat" data-id="' + esc(c.id) + '">' +
+    '<input type="color" value="' + esc(c.color) + '" data-color />' +
+    '<input type="text" value="' + esc(c.name) + '" maxlength="40" data-name />' +
+    (c.system ? '<span class="muted cal-cat-tag">office</span>' : '<button type="button" class="ghost" data-retire>Retire</button>') +
+    '</div>').join('');
+}
+
+async function saveCat(id, name, color) {
+  const res = await cal('calCategorySave', { id, name, color });
+  $('calCatError').hidden = res.ok;
+  if (!res.ok) { $('calCatError').textContent = res.error; return false; }
+  await renderCalendar(currentView(), currentArg());
+  return true;
+}
+
+$('calCatList').addEventListener('change', async (ev) => {
+  const row = ev.target.closest('.cal-cat');
+  if (!row) return;
+  await saveCat(row.dataset.id, row.querySelector('[data-name]').value, row.querySelector('[data-color]').value);
+});
+
+$('calCatList').addEventListener('click', async (ev) => {
+  if (!ev.target.matches('[data-retire]')) return;
+  const row = ev.target.closest('.cal-cat');
+  if (!window.confirm('Retire this category? Events already using it keep it.')) return;
+  const res = await cal('calCategoryRetire', { id: row.dataset.id });
+  $('calCatError').hidden = res.ok;
+  if (!res.ok) { $('calCatError').textContent = res.error; return; }
+  await renderCalendar(currentView(), currentArg());
+});
+
+$('calCatForm').addEventListener('submit', async (ev) => {
+  ev.preventDefault();
+  if (await saveCat(null, $('calCatName').value, $('calCatColor').value)) $('calCatName').value = '';
 });
