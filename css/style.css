@@ -1157,3 +1157,11 @@ input[type="search"]::-webkit-search-cancel-button {
   .cal-item { flex-direction: column; gap: 2px; }
   .cal-when { min-width: 0; }
 }
+
+.cal-add { margin-top: 16px; }
+.cal-editor { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.cal-editor label { display: block; margin-bottom: 10px; }
+.cal-editor input[type="text"], .cal-editor input[type="date"], .cal-editor input[type="time"],
+.cal-editor input[type="number"], .cal-editor select, .cal-editor textarea { width: 100%; }
+.cal-editor .cal-allday { display: flex; align-items: center; gap: 8px; }
+.cal-editor .cal-allday input { width: auto; }

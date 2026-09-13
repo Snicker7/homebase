@@ -2,9 +2,9 @@
 // phone; month is the overview; tapping a day opens it. All three render the
 // same sorted occurrence list, so a change to the data layer cannot make two
 // views disagree.
-import { sb } from './api.js';
+import { sb, cal } from './api.js';
 import { $, esc } from './util.js';
-import { expandAll, officeOccurrence, sortOccurrences, addDays } from '../supabase/functions/_shared/recur.js';
+import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday } from '../supabase/functions/_shared/recur.js';
 import { monthMatrix, monthBounds, monthTitle, shiftMonth, groupByDay, dayLabel, timeLabel, WEEKDAY_INITIALS } from './calgrid.js';
 
 // Denver's date, not the browser's: every day and time in this app is Denver
@@ -13,6 +13,12 @@ export const denverToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'A
 
 const AGENDA_DAYS = 42;
 export let CATS = {};
+
+// The list the screen last drew, so a click can find the occurrence behind a
+// row without re-reading, and the rule behind the series so the form can show it.
+let LAST_ITEMS = [];
+const REPEAT_FREQ = {};
+const REPEAT_UNTIL = {};
 
 async function loadCategories() {
   const { data, error } = await sb.from('event_categories').select('*').order('sort');
@@ -46,8 +52,13 @@ async function loadWindow(from, to) {
     id: r.id, title: r.title, notes: r.notes, categoryId: r.category_id,
     day: r.day, time: r.time, minutes: r.minutes, repeat: r.repeat, repeatUntil: r.repeat_until,
   }));
-  const items = expandAll(mine, exceptions, from, to).concat(office.data.map(officeOccurrence));
-  return { items: sortOccurrences(items), office: office.data };
+  for (const s of mine) {
+    REPEAT_FREQ[s.id] = s.repeat ? s.repeat.freq : '';
+    REPEAT_UNTIL[s.id] = s.repeatUntil || '';
+  }
+  const items = sortOccurrences(expandAll(mine, exceptions, from, to).concat(office.data.map(officeOccurrence)));
+  LAST_ITEMS = items;
+  return { items, office: office.data };
 }
 
 const color = (id) => (CATS[id] && CATS[id].color) || '#8d9bb5';
@@ -141,8 +152,7 @@ function itemRow(o) {
     '<span class="cal-what">' +
     (o.business ? '<span class="cal-business">' + esc(o.business) + '</span>' : '') +
     '<span class="cal-title-text">' + esc(o.title) + '</span></span>';
-  // Office items are edited in the office; family events open the editor, which
-  // arrives with the next task and until then does nothing.
+  // Office items are edited in the office; family events open the editor.
   return o.readOnly && o.url
     ? '<a class="' + cls + '" style="--cat:' + esc(color(o.categoryId)) + '" href="' + esc(o.url) + '" target="_blank" rel="noopener">' + inner + '</a>'
     : '<div class="' + cls + '" style="--cat:' + esc(color(o.categoryId)) + '" data-event="' + esc(o.eventId) + '" data-day="' + esc(o.seriesDay) + '">' + inner + '</div>';
@@ -151,3 +161,126 @@ function itemRow(o) {
 $('calTabAgenda').addEventListener('click', () => { location.hash = '#/calendar'; });
 $('calTabMonth').addEventListener('click', () => { location.hash = '#/calendar/month'; });
 $('calToday').addEventListener('click', () => { location.hash = '#/calendar/day/' + denverToday(); });
+
+/* ── the editor ───────────────────────────────────────────────────────────── */
+// What the open form is editing: a new event, a whole series, or one occurrence.
+let editing = null; // { id, seriesDay, scope: 'series' | 'occurrence' }
+
+function openEditor(occurrence) {
+  const e = occurrence;
+  editing = e ? { id: e.eventId, seriesDay: e.seriesDay, scope: 'series' } : null;
+  $('calFormError').hidden = true;
+  $('calId').value = e ? e.eventId : '';
+  $('calSeriesDay').value = e ? e.seriesDay : '';
+  $('calTitleInput').value = e ? e.title : '';
+  $('calNotes').value = e ? e.notes : '';
+  $('calDay').value = e ? e.day : denverToday();
+  $('calAllDay').checked = !e || !e.time;
+  $('calTime').value = e && e.time ? e.time : '09:00';
+  $('calMinutes').value = e && e.minutes ? e.minutes : 60;
+  $('calCategory').innerHTML = Object.values(CATS).filter((c) => c.active && !c.system)
+    .map((c) => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
+  if (e) $('calCategory').value = e.categoryId;
+  $('calRepeat').value = e && e.repeatFreq ? e.repeatFreq : '';
+  $('calUntil').value = e && e.repeatUntil ? e.repeatUntil : '';
+  $('calDelete').hidden = !e;
+  // An occurrence edit hides this below; every other open must show it again,
+  // since nothing else resets it.
+  $('calRepeat').closest('label').hidden = false;
+  syncFormBits();
+  $('calEditor').hidden = false;
+  $('calTitleInput').focus();
+}
+
+function syncFormBits() {
+  $('calTimed').hidden = $('calAllDay').checked;
+  $('calUntilWrap').hidden = !$('calRepeat').value;
+}
+
+function repeatFromForm(day) {
+  const freq = $('calRepeat').value;
+  if (!freq) return null;
+  // The rule is anchored on the day the event starts, which is the only reading
+  // the validator accepts and the only one that keeps the first occurrence put.
+  if (freq === 'weekly') return { freq, days: [weekday(day)] };
+  if (freq === 'monthly') return { freq, day: +day.slice(8, 10) };
+  return { freq };
+}
+
+async function submitEvent(ev) {
+  ev.preventDefault();
+  const day = $('calDay').value;
+  const allDay = $('calAllDay').checked;
+  const payload = {
+    id: $('calId').value || undefined,
+    title: $('calTitleInput').value,
+    notes: $('calNotes').value,
+    categoryId: $('calCategory').value,
+    day,
+    time: allDay ? null : $('calTime').value,
+    minutes: allDay ? null : Number($('calMinutes').value),
+    repeat: repeatFromForm(day),
+    repeatUntil: $('calUntil').value || null,
+  };
+  const res = editing && editing.scope === 'occurrence'
+    ? await cal('occurrenceSave', {
+        eventId: editing.id, day: editing.seriesDay,
+        override: { title: payload.title, notes: payload.notes, categoryId: payload.categoryId,
+                    day: payload.day, time: payload.time, minutes: payload.minutes },
+      })
+    : await cal('eventSave', payload);
+  if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
+  closeEditor();
+  await renderCalendar(currentView(), currentArg());
+}
+
+async function deleteEvent() {
+  if (!editing) return;
+  const res = editing.scope === 'occurrence'
+    ? await cal('occurrenceSkip', { eventId: editing.id, day: editing.seriesDay })
+    : await cal('eventDelete', { id: editing.id });
+  if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
+  closeEditor();
+  await renderCalendar(currentView(), currentArg());
+}
+
+function closeEditor() { $('calEditor').hidden = true; editing = null; }
+
+// The hash is the source of truth for which view to re-render after a write.
+const currentView = () => {
+  const h = location.hash;
+  return h.startsWith('#/calendar/month') ? 'month' : h.startsWith('#/calendar/day/') ? 'day' : 'agenda';
+};
+const currentArg = () => {
+  const h = location.hash;
+  if (h.startsWith('#/calendar/month/')) return h.slice(17);
+  if (h.startsWith('#/calendar/day/')) return h.slice(15);
+  return undefined;
+};
+
+// A repeating event asks which it means; a one-off has only one answer.
+async function askScope(occurrence) {
+  if (!occurrence.repeating) return 'series';
+  return window.confirm('This event repeats.\n\nOK changes just this one.\nCancel changes the whole series.')
+    ? 'occurrence' : 'series';
+}
+
+$('calBody').addEventListener('click', async (ev) => {
+  const row = ev.target.closest('.cal-item[data-event]');
+  if (!row) return;
+  const found = LAST_ITEMS.find((o) => o.eventId === row.dataset.event && o.seriesDay === row.dataset.day);
+  if (!found) return;
+  const scope = await askScope(found);
+  openEditor(Object.assign({}, found, { repeatFreq: REPEAT_FREQ[found.eventId] || '', repeatUntil: REPEAT_UNTIL[found.eventId] || '' }));
+  editing.scope = scope;
+  // Editing one occurrence cannot change the rule, so the rule controls go away.
+  $('calRepeat').closest('label').hidden = scope === 'occurrence';
+  $('calUntilWrap').hidden = scope === 'occurrence' || !$('calRepeat').value;
+});
+
+$('calAdd').addEventListener('click', () => openEditor(null));
+$('calCancel').addEventListener('click', closeEditor);
+$('calDelete').addEventListener('click', deleteEvent);
+$('calForm').addEventListener('submit', submitEvent);
+$('calAllDay').addEventListener('change', syncFormBits);
+$('calRepeat').addEventListener('change', syncFormBits);
