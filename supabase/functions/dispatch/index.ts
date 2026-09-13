@@ -5,7 +5,8 @@ import { runAction } from '../_shared/pg.js';
 import { createService } from '../_shared/service.js';
 import { createResendMailer } from '../_shared/mail.js';
 import { importFeed } from '../_shared/officefeed.js';
-import { tzDate } from '../_shared/clock.js';
+import { tzDate, tzHourStr } from '../_shared/clock.js';
+import { gatherDigest, digestDays, renderDigest } from '../_shared/caldigest.js';
 
 const env = readEnv();
 const sql = postgres(env.dbUrl, { max: 2, prepare: false });
@@ -47,6 +48,33 @@ Deno.serve(async (req) => {
       console.log('office import', JSON.stringify({ imported: office.imported, failures: office.failures.length }));
     } catch (e) {
       result.failures.push('office import — ' + ((e as Error)?.message || e));
+      result.ok = false;
+    }
+  }
+  // The calendar digest reads tables the habits snapshot does not carry, so it
+  // runs here rather than inside the service.
+  const hour = tzHourStr(new Date());
+  const [digestSetting] = await sql`select value #>> '{}' as v from settings where key = 'calendarDigestTime'`;
+  if ((digestSetting?.v || '07:00') === hour) {
+    try {
+      const today = tzDate(new Date());
+      const items = await gatherDigest(sql, today);
+      const cats = Object.fromEntries(
+        (await sql`select id, color from event_categories`).map((c) => [c.id, { color: c.color }]),
+      );
+      const mail0 = renderDigest(digestDays(items, today), cats, env.dashboardUrl);
+      if (mail0) {
+        for (const p of await sql`select email from people order by email`) {
+          try {
+            await mail.send({ to: p.email, subject: mail0.subject, html: mail0.html });
+          } catch (e) {
+            result.failures.push('calendar digest to ' + p.email + ' — ' + ((e as Error)?.message || e));
+            result.ok = false;
+          }
+        }
+      }
+    } catch (e) {
+      result.failures.push('calendar digest — ' + ((e as Error)?.message || e));
       result.ok = false;
     }
   }
