@@ -201,14 +201,16 @@ rather than silently shifted.
 ### Reading a view
 
 The screen computes a window — the visible month padded to whole weeks, or
-the agenda's current horizon — and issues three reads in parallel under RLS:
+the agenda's current horizon — and reads three tables under RLS. The first two
+go in parallel; the third waits, because it needs the event ids the first one
+returns:
 
 1. `events` where `day <= window.to`, and either the event repeats and its
    `repeat_until` is null or on or after `window.from`, or the event is a
    one-off whose `day` is on or after `window.from`. A past one-off must not
    come back; a series that started years ago must.
-2. `event_exceptions` for those event ids.
-3. `office_items` where `day` is inside the window.
+2. `office_items` where `day` is inside the window.
+3. `event_exceptions` for the event ids read 1 returned.
 
 `recur.expand()` turns series and exceptions into occurrences. Office items
 are mapped into the same occurrence shape with a `readOnly` flag, their
@@ -239,8 +241,10 @@ A one-off event skips the question entirely.
 Hourly, inside `dispatch`, and on demand through `officeRefresh`:
 
 1. `GET https://www.keepsitemedia.com/office/api/feed` with
-   `Authorization: Bearer $KEEPSITE_FEED_TOKEN`, no `from`/`to`, taking the
-   feed's own default window of 30 days back to 90 ahead.
+   `Authorization: Bearer $KEEPSITE_FEED_TOKEN` and an explicit `from`/`to` of
+   30 days back to 90 ahead. That matches the feed's own default, but the
+   delete step in 4 has to know exactly which window it is replacing, so the
+   window is stated rather than assumed.
 2. Normalize each item: `due` or `ymd` becomes `day`, camelCase becomes
    snake_case, missing fields become null.
 3. Upsert every item by `id`, stamping `fetched_at`.
@@ -291,7 +295,7 @@ first, then timed items with their ranges. The editor is a panel in the
 idiom `js/inbox.js` uses, which already avoids the controls that behave
 badly on a phone.
 
-A category's color drives a dot and a 4px left bar at full strength. Filled
+A category's color drives a 4px left bar at full strength. Filled
 surfaces use `color-mix(in oklab, var(--cat) 18%, var(--card))` so a
 category tints its row rather than fighting the theme.
 
