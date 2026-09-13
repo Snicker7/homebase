@@ -252,7 +252,9 @@ function repeatFromForm(day, prev) {
   const freq = $('calRepeat').value;
   if (!freq) return null;
   // An imported series can repeat on several weekdays; re-deriving from the
-  // start day alone would silently drop the others.
+  // start day alone would silently drop the others. An empty set never reaches
+  // here from the picker — submitEvent refuses it — so the fallbacks only stand
+  // in for a picker that was never shown, as in an occurrence edit.
   if (freq === 'weekly') {
     const chosen = weekdaysFromForm();
     if (chosen.length) return { freq, days: chosen };
@@ -264,9 +266,19 @@ function repeatFromForm(day, prev) {
   return { freq };
 }
 
+function formError(message) {
+  $('calFormError').hidden = false;
+  $('calFormError').textContent = message;
+}
+
 async function submitEvent(ev) {
   ev.preventDefault();
   const day = $('calDay').value;
+  // Unticking every box is a choice, not a slip; filling one back in would save
+  // a rule nobody picked. Said here rather than at the far end of a round trip.
+  if (!$('calWeekdays').hidden && !weekdaysFromForm().length) {
+    return formError('a weekly repeat needs at least one weekday');
+  }
   const allDay = $('calAllDay').checked;
   const prevRule = editing && SERIES.get(editing.id) ? SERIES.get(editing.id).repeat : null;
   const payload = {
@@ -287,7 +299,7 @@ async function submitEvent(ev) {
                     day: payload.day, time: payload.time, minutes: payload.minutes },
       })
     : await api('eventSave', payload);
-  if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
+  if (!res.ok) return formError(res.error);
   closeEditor();
   await renderCalendar(currentView(), currentArg());
 }
@@ -302,7 +314,7 @@ async function deleteEvent() {
   const res = editing.scope === 'occurrence'
     ? await api('occurrenceSkip', { eventId: editing.id, day: editing.seriesDay })
     : await api('eventDelete', { id: editing.id });
-  if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
+  if (!res.ok) return formError(res.error);
   closeEditor();
   await renderCalendar(currentView(), currentArg());
 }
