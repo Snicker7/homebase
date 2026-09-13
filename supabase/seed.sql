@@ -16,3 +16,18 @@ insert into public.budget_categories (id, name, emoji, kind, wallet_owner) value
   ('transfer', 'Transfer', '🔁', 'transfer', null),
   ('income', 'Income', '💵', 'income', null)
 on conflict do nothing;
+
+insert into public.event_categories (id, name, color, sort, system) values
+  ('family',       'Family',       '#57c785', 10, false),
+  ('appointments', 'Appointments', '#ef6f8e', 20, false),
+  ('school',       'School',       '#e8b84b', 30, false),
+  ('social',       'Social',       '#f2924b', 40, false),
+  ('travel',       'Travel',       '#3fbfae', 50, false),
+  ('birthdays',    'Birthdays',    '#c97ae0', 60, false),
+  ('keepsite',     'Keepsite',     '#7f8cf0', 70, true),
+  ('lova',         'Lova',         '#5ec8f2', 80, true),
+  ('office',       'Office',       '#8d9bb5', 90, true)
+on conflict do nothing;
+
+insert into public.settings (key, value) values ('calendarDigestTime', '"07:00"'::jsonb)
+on conflict do nothing;
