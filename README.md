@@ -174,6 +174,8 @@ trailing average; the History view shows twelve months of bars per category.
      import
    - an all-day event spanning more than one day, since the schema has no
      span field
+   - a timed event longer than 24 hours, since only all-day events can span
+     days
 
    `--apply` refuses to run a second time against a category that already
    has events — pass `--again` to import anyway. Then turn off Google
