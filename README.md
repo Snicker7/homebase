@@ -139,6 +139,51 @@ the Budget screen reads. No function changes; push `main` and the Budget link
 appears in the nav. The Month view compares each spending category with its
 trailing average; the History view shows twelve months of bars per category.
 
+## Calendar (phase 4)
+
+1. **Migrate.** `npx supabase db push` applies `0004_calendar.sql`. Then
+   `psql "$PROD_DB_URL" -f supabase/seed.sql` adds the nine event categories
+   and the digest-time setting (it skips rows that already exist).
+
+2. **Office feed token.** Get `KEEPSITE_FEED_TOKEN` from the keepsite site's
+   Netlify environment — the same value on both sides — then:
+
+       npx supabase secrets set KEEPSITE_FEED_TOKEN=...
+       npx supabase functions deploy api
+       npx supabase functions deploy dispatch --no-verify-jwt
+
+   Until the keepsite `office-additions` branch deploys, the hourly import
+   logs a failed fetch and `office_items` stays empty. The calendar and the
+   morning email work regardless; only the business items are missing.
+
+3. **Import Google Calendar.** Export each calendar from its Google settings
+   page, then per file:
+
+       node scripts/import-ics.js --file family.ics --category family --db "$PROD_DB_URL"
+       node scripts/import-ics.js --file family.ics --category family --db "$PROD_DB_URL" --apply
+
+   The dry run lists every event the calendar cannot express, with a reason,
+   and imports nothing. Re-enter those by hand. It refuses:
+
+   - a repeat rule with `INTERVAL` other than 1, `COUNT`, `BYSETPOS`, an
+     ordinal `BYDAY` (nth-weekday), `BYMONTH`, or `BYDAY` on a daily or
+     yearly rule (this is what a "4th Thursday of November" holiday looks
+     like)
+   - a timed event whose start or end names a `TZID` other than
+     `America/Denver`, or ends in a UTC `Z` — only floating or Denver times
+     import
+   - an all-day event spanning more than one day, since the schema has no
+     span field
+
+   `--apply` refuses to run a second time against a category that already
+   has events — pass `--again` to import anyway. Then turn off Google
+   Calendar's own notifications so the morning email is the only one.
+
+4. **Verify.** Push `main` and the Calendar link appears in the nav. Add an
+   event; it shows in Agenda under Today. Press Sync office; the office items
+   appear under their brand colors. At `calendarDigestTime` the next morning,
+   both inboxes get one email covering three days.
+
 ## Verify in production
 
 After step 8 above, with the user:
@@ -169,4 +214,5 @@ Rows in the `settings` table, editable in the SQL editor. The app writes
 | key | default | meaning |
 |---|---|---|
 | `choreDigestTime` | `08:00` | Hour (Denver, whole hour) the morning chore digest goes out. One email per person listing the chores due that day. |
+| `calendarDigestTime` | `07:00` | Hour (Denver, whole hour) the calendar email goes out. One email per person covering today and the next two days. Nothing sends when all three days are empty. |
 | `trailingMonths` | `6` | How many complete months the Budget screen averages over. |
