@@ -82,3 +82,20 @@ test('gatherDigest asks for exactly three days and merges both sources', async (
   assert.deepStrictEqual(asked[0], ['2026-09-15', '2026-09-17']);
   assert.deepStrictEqual(items.map((i) => i.title), ['Soccer', 'Kickoff']);
 });
+
+test('the digest carries an occurrence moved in from a series outside its three days', () => {
+  const series = { id: 'e1', title: 'Practice', notes: '', categoryId: 'family',
+    day: '2026-10-05', time: null, minutes: null, repeat: { freq: 'weekly', days: [1] }, repeatUntil: null };
+  const deps = {
+    listSeries: async (_sql, from, to) => { RANGE.push([from, to]); return [series]; },
+    listExceptions: async () => [{ eventId: 'e1', day: '2026-10-05', skipped: false, override: { day: '2026-09-28' } }],
+    listOfficeItems: async () => [],
+  };
+  const RANGE = [];
+  return gatherDigest(null, '2026-09-28', deps).then((items) => {
+    // listSeries pads the window itself, so the digest asks for the three days
+    // it means to send and gets the moved occurrence back inside them.
+    assert.deepStrictEqual(RANGE, [['2026-09-28', '2026-09-30']]);
+    assert.deepStrictEqual(items.map((o) => [o.day, o.title]), [['2026-09-28', 'Practice']]);
+  });
+});

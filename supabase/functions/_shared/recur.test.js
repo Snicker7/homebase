@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, daysBetween, weekday, daysInMonth, timeLabel, MAX_WINDOW_DAYS, PAD_DAYS } from './recur.js';
+import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, daysBetween, weekday, daysInMonth, timeLabel, fetchWindow, MAX_WINDOW_DAYS, PAD_DAYS } from './recur.js';
 
 const series = (over) => Object.assign({
   id: 'e1', title: 'Thing', notes: '', categoryId: 'family',
@@ -172,4 +172,36 @@ test('timeLabel reads a range and collapses a shared meridiem', () => {
   assert.strictEqual(timeLabel('11:30', 60), '11:30 AM – 12:30 PM');
   assert.strictEqual(timeLabel('00:00', 15), '12:00 – 12:15 AM');
   assert.strictEqual(timeLabel('23:30', 60), '11:30 PM – 12:30 AM');
+});
+
+test('fetchWindow widens the drawn window by the pad on each side', () => {
+  assert.deepStrictEqual(fetchWindow('2026-09-28', '2026-09-28'),
+    { from: '2026-08-28', to: '2026-10-29' });
+  assert.deepStrictEqual(fetchWindow('2026-09-01', '2026-09-30'),
+    { from: addDays('2026-09-01', -PAD_DAYS), to: addDays('2026-09-30', PAD_DAYS) });
+});
+
+// Both readers select rows with the same predicate, in SQL and in JS; this is
+// that predicate, so a test can say which window it was handed.
+const selects = (row, win) => row.day <= win.to &&
+  (row.repeat ? !row.repeatUntil || row.repeatUntil >= win.from : row.day >= win.from);
+
+test('a series starting after the window still reaches the day moved into it', () => {
+  // Weekly from Monday 5 October, with that first occurrence moved back to 28
+  // September — twenty days, well inside the bound the editor offers.
+  const s = series({ day: '2026-10-05', repeat: { freq: 'weekly', days: [1] } });
+  const ex = [{ eventId: 'e1', day: '2026-10-05', skipped: false, override: { day: '2026-09-28' } }];
+  const show = '2026-09-28';
+  assert.ok(!selects(s, { from: show, to: show }), 'the drawn window alone drops the row');
+  assert.ok(selects(s, fetchWindow(show, show)), 'the fetch window keeps it');
+  assert.deepStrictEqual(days(expandAll([s], ex, show, show)), [show]);
+});
+
+test('a series ended before the window still reaches the day moved into it', () => {
+  const s = series({ day: '2026-09-01', repeat: { freq: 'monthly', day: 1 }, repeatUntil: '2026-09-01' });
+  const ex = [{ eventId: 'e1', day: '2026-09-01', skipped: false, override: { day: '2026-09-20' } }];
+  const show = '2026-09-20';
+  assert.ok(!selects(s, { from: show, to: show }), 'the drawn window alone drops the row');
+  assert.ok(selects(s, fetchWindow(show, show)), 'the fetch window keeps it');
+  assert.deepStrictEqual(days(expandAll([s], ex, show, show)), [show]);
 });

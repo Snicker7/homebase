@@ -1,9 +1,13 @@
 // Every query the calendar runs. Callers pass a postgres.js handle; nothing
 // here decides anything, it just reads and writes rows.
+import { fetchWindow } from './recur.js';
 
 // Series overlapping a window: a repeating event that started years ago still
-// counts, a one-off that happened years ago does not.
-export async function listSeries(sql, from, to) {
+// counts, a one-off that happened years ago does not. Callers name the window
+// they mean to show; fetchWindow widens it, because an exception can move an
+// occurrence into that window from a series that begins or ends outside it.
+export async function listSeries(sql, showFrom, showTo) {
+  const { from, to } = fetchWindow(showFrom, showTo);
   const rows = await sql`
     select id, title, notes, category_id, to_char(day, 'YYYY-MM-DD') as day,
            to_char(time, 'HH24:MI') as time, minutes, repeat,

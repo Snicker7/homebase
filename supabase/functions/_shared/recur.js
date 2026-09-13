@@ -128,6 +128,13 @@ export function expandSeries(series, exceptions, from, to) {
 // than the pad — past it the moved occurrence would render in no window at all.
 export const PAD_DAYS = 31;
 
+// The window a reader must *select* rows over, given the window it means to
+// draw. Padding the expansion is not enough on its own: a series whose own
+// day or repeat_until falls outside the drawn window never reaches the
+// expander at all, and an exception can pull one of its occurrences up to
+// PAD_DAYS inside. Both readers share this so the two bounds cannot drift.
+export const fetchWindow = (from, to) => ({ from: addDays(from, -PAD_DAYS), to: addDays(to, PAD_DAYS) });
+
 export function expandAll(seriesList, exceptions, from, to) {
   if (daysBetween(from, to) > MAX_WINDOW_DAYS) {
     throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');

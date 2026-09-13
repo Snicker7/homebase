@@ -4,7 +4,7 @@
 // views disagree.
 import { sb, api } from './api.js';
 import { $, esc, denverToday } from './util.js';
-import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, timeLabel, PAD_DAYS } from '../supabase/functions/_shared/recur.js';
+import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, timeLabel, fetchWindow, PAD_DAYS } from '../supabase/functions/_shared/recur.js';
 import { monthMatrix, monthBounds, monthTitle, shiftMonth, groupByDay, dayLabel, WEEKDAY_INITIALS } from './calgrid.js';
 
 const AGENDA_DAYS = 42;
@@ -29,9 +29,13 @@ async function loadCategories() {
 // One read path for every view: series, their exceptions, and the office cache.
 async function loadWindow(from, to) {
   SERIES.clear();
+  // Series are selected over a wider window than they are drawn over, for the
+  // reason fetchWindow gives. Office rows are one occurrence each with nothing
+  // that can move them, so they are read over the window as asked.
+  const fetch = fetchWindow(from, to);
   const [series, office] = await Promise.all([
     sb.from('events').select('id,title,notes,category_id,day,time,minutes,repeat,repeat_until')
-      .lte('day', to),
+      .lte('day', fetch.to),
     sb.from('office_items').select('*').gte('day', from).lte('day', to),
   ]);
   if (series.error) throw new Error(series.error.message);
@@ -40,7 +44,7 @@ async function loadWindow(from, to) {
   // The overlap test is more than a column filter can say, so it is applied
   // here: a repeating series that started years ago still counts, a one-off
   // that happened years ago does not.
-  const rows = series.data.filter((r) => (r.repeat ? !r.repeat_until || r.repeat_until >= from : r.day >= from));
+  const rows = series.data.filter((r) => (r.repeat ? !r.repeat_until || r.repeat_until >= fetch.from : r.day >= fetch.from));
   const ids = rows.map((r) => r.id);
   let exceptions = [];
   if (ids.length) {
@@ -196,21 +200,32 @@ function openEditor(occurrence) {
   $('calRepeat').closest('label').hidden = false;
   // Only a stored weekly rule seeds these; anything else leaves them empty so
   // the first switch to weekly picks up whatever date is in the form by then.
-  setWeekdays(series && series.repeat && series.repeat.freq === 'weekly' ? series.repeat.days : []);
+  // A rule with no day list is one recur.js refuses to expand, guarded here
+  // for the same reason it is guarded there.
+  const stored = series && series.repeat && series.repeat.freq === 'weekly' && Array.isArray(series.repeat.days)
+    ? series.repeat.days : null;
+  setWeekdays(stored || []);
+  // A stored rule is somebody's choice already; only a set this module seeded
+  // is allowed to follow the date around.
+  weekdaysPicked = !!stored;
   showScope(e, 'series');
   syncFormBits();
   $('calEditor').hidden = false;
   $('calTitleInput').focus();
 }
 
+// Whether the weekday ticks are somebody's choice or this module's default.
+let weekdaysPicked = false;
+
 function syncFormBits() {
   $('calTimed').hidden = $('calAllDay').checked;
   $('calUntilWrap').hidden = !$('calRepeat').value;
   const weekly = $('calRepeat').value === 'weekly';
   $('calWeekdays').hidden = !weekly;
-  // Switching to weekly with nothing ticked would post a rule the validator
-  // refuses; the start weekday is the one day the rule must contain anyway.
-  if (weekly && !weekdaysFromForm().length) setWeekdays([weekday($('calDay').value)]);
+  // The start weekday is the one day a weekly rule must contain, so it is the
+  // default — and it follows the date until somebody ticks a box themselves,
+  // after which their set stands and the validator speaks if it has to.
+  if (weekly && !weekdaysPicked) setWeekdays([weekday($('calDay').value)]);
 }
 
 const weekdayBoxes = () => [...$('calWeekdays').querySelectorAll('[data-weekday]')];
@@ -341,6 +356,7 @@ $('calForm').addEventListener('submit', submitEvent);
 $('calAllDay').addEventListener('change', syncFormBits);
 $('calRepeat').addEventListener('change', syncFormBits);
 $('calDay').addEventListener('change', syncFormBits);
+$('calWeekdays').addEventListener('change', () => { weekdaysPicked = true; });
 
 $('calSync').addEventListener('click', async () => {
   $('calSync').disabled = true;
