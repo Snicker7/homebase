@@ -1,5 +1,5 @@
 begin;
-select plan(14);
+select plan(18);
 
 select has_table('public', 'event_categories', 'event_categories exists');
 select has_table('public', 'events', 'events exists');
@@ -41,6 +41,16 @@ select throws_ok(
 set local role anon;
 select throws_ok('select * from public.events', '42501', NULL, 'anon cannot read events');
 select throws_ok('select * from public.office_items', '42501', NULL, 'anon cannot read office_items');
+reset role;
+
+-- The frontend reads all four tables directly under RLS. A missing grant would
+-- leave the calendar empty with no error anywhere, so read them as the role the
+-- browser actually holds.
+set local role authenticated;
+select is((select count(*)::int from public.event_categories), 9, 'authenticated reads event_categories');
+select is((select count(*)::int from public.events), 0, 'authenticated reads events');
+select is((select count(*)::int from public.event_exceptions), 0, 'authenticated reads event_exceptions');
+select is((select count(*)::int from public.office_items), 0, 'authenticated reads office_items');
 reset role;
 
 select * from finish();
