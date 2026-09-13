@@ -59,23 +59,3 @@ export function dayLabel(day, today) {
   const year = day.slice(0, 4) === today.slice(0, 4) ? '' : ' ' + day.slice(0, 4);
   return name + ' ' + dom + ' ' + month + year;
 }
-
-const clock = (mins) => {
-  const m = ((mins % 1440) + 1440) % 1440;
-  const h = Math.floor(m / 60);
-  const hour12 = h % 12 === 0 ? 12 : h % 12;
-  return { text: hour12 + ':' + ('0' + (m % 60)).slice(-2), meridiem: h < 12 ? 'AM' : 'PM' };
-};
-
-export function timeLabel(time, minutes) {
-  if (!time) return 'All day';
-  const start = +time.slice(0, 2) * 60 + +time.slice(3, 5);
-  const a = clock(start);
-  if (!minutes) return a.text + ' ' + a.meridiem;
-  const b = clock(start + minutes);
-  // "9:00 – 9:30 AM" reads better than saying AM twice, but a range that
-  // crosses noon or midnight needs both.
-  return a.meridiem === b.meridiem
-    ? a.text + ' – ' + b.text + ' ' + b.meridiem
-    : a.text + ' ' + a.meridiem + ' – ' + b.text + ' ' + b.meridiem;
-}

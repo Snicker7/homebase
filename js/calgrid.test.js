@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { monthMatrix, monthBounds, groupByDay, dayLabel, timeLabel, shiftMonth } from './calgrid.js';
+import { monthMatrix, monthBounds, groupByDay, dayLabel, shiftMonth } from './calgrid.js';
 
 test('a month grid is six Sunday-first weeks that contain the month', () => {
   const grid = monthMatrix('2026-09');
@@ -28,7 +28,7 @@ test('shiftMonth walks across year ends', () => {
   assert.strictEqual(shiftMonth('2026-01', -1), '2025-12');
 });
 
-test('groupByDay keeps order and drops empty days', () => {
+test('groupByDay buckets by day in date order and gives a gap no bucket', () => {
   const out = groupByDay([
     { day: '2026-09-15', title: 'a' }, { day: '2026-09-17', title: 'b' }, { day: '2026-09-15', title: 'c' },
   ]);
@@ -40,12 +40,4 @@ test('dayLabel names today and tomorrow, then falls back to the date', () => {
   assert.strictEqual(dayLabel('2026-09-16', '2026-09-15'), 'Tomorrow');
   assert.strictEqual(dayLabel('2026-09-17', '2026-09-15'), 'Thursday 17 September');
   assert.strictEqual(dayLabel('2027-01-02', '2026-09-15'), 'Saturday 2 January 2027');
-});
-
-test('timeLabel reads a range and collapses a shared meridiem', () => {
-  assert.strictEqual(timeLabel(null, null), 'All day');
-  assert.strictEqual(timeLabel('09:00', 30), '9:00 – 9:30 AM');
-  assert.strictEqual(timeLabel('11:30', 60), '11:30 AM – 12:30 PM');
-  assert.strictEqual(timeLabel('00:00', 15), '12:00 – 12:15 AM');
-  assert.strictEqual(timeLabel('23:30', 60), '11:30 PM – 12:30 AM');
 });

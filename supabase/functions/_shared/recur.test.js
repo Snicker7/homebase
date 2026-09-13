@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, daysBetween, weekday, daysInMonth, MAX_WINDOW_DAYS, PAD_DAYS } from './recur.js';
+import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, daysBetween, weekday, daysInMonth, timeLabel, MAX_WINDOW_DAYS, PAD_DAYS } from './recur.js';
 
 const series = (over) => Object.assign({
   id: 'e1', title: 'Thing', notes: '', categoryId: 'family',
@@ -164,4 +164,12 @@ test('an override moved by the pad still lands in the window it moved into', () 
   const moved = addDays('2026-09-01', PAD_DAYS);
   const ex = [{ eventId: 'e1', day: '2026-09-01', skipped: false, override: { day: moved } }];
   assert.deepStrictEqual(days(expandAll([s], ex, moved, moved)), [moved]);
+});
+
+test('timeLabel reads a range and collapses a shared meridiem', () => {
+  assert.strictEqual(timeLabel(null, null), 'All day');
+  assert.strictEqual(timeLabel('09:00', 30), '9:00 – 9:30 AM');
+  assert.strictEqual(timeLabel('11:30', 60), '11:30 AM – 12:30 PM');
+  assert.strictEqual(timeLabel('00:00', 15), '12:00 – 12:15 AM');
+  assert.strictEqual(timeLabel('23:30', 60), '11:30 PM – 12:30 AM');
 });

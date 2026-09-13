@@ -2,17 +2,13 @@
 // phone; month is the overview; tapping a day opens it. All three render the
 // same sorted occurrence list, so a change to the data layer cannot make two
 // views disagree.
-import { sb, cal } from './api.js';
-import { $, esc } from './util.js';
-import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, PAD_DAYS } from '../supabase/functions/_shared/recur.js';
-import { monthMatrix, monthBounds, monthTitle, shiftMonth, groupByDay, dayLabel, timeLabel, WEEKDAY_INITIALS } from './calgrid.js';
-
-// Denver's date, not the browser's: every day and time in this app is Denver
-// wall-clock, and a laptop in another zone must not shift what "today" means.
-export const denverToday = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
+import { sb, api } from './api.js';
+import { $, esc, denverToday } from './util.js';
+import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, timeLabel, PAD_DAYS } from '../supabase/functions/_shared/recur.js';
+import { monthMatrix, monthBounds, monthTitle, shiftMonth, groupByDay, dayLabel, WEEKDAY_INITIALS } from './calgrid.js';
 
 const AGENDA_DAYS = 42;
-export let CATS = {};
+let CATS = {};
 
 // The list the screen last drew, so a click can find the occurrence behind a
 // row without re-reading.
@@ -32,6 +28,7 @@ async function loadCategories() {
 
 // One read path for every view: series, their exceptions, and the office cache.
 async function loadWindow(from, to) {
+  SERIES.clear();
   const [series, office] = await Promise.all([
     sb.from('events').select('id,title,notes,category_id,day,time,minutes,repeat,repeat_until')
       .lte('day', to),
@@ -234,12 +231,12 @@ async function submitEvent(ev) {
     repeatUntil: $('calUntil').value || null,
   };
   const res = editing && editing.scope === 'occurrence'
-    ? await cal('occurrenceSave', {
+    ? await api('occurrenceSave', {
         eventId: editing.id, day: editing.seriesDay,
         override: { title: payload.title, notes: payload.notes, categoryId: payload.categoryId,
                     day: payload.day, time: payload.time, minutes: payload.minutes },
       })
-    : await cal('eventSave', payload);
+    : await api('eventSave', payload);
   if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
   closeEditor();
   await renderCalendar(currentView(), currentArg());
@@ -248,8 +245,8 @@ async function submitEvent(ev) {
 async function deleteEvent() {
   if (!editing) return;
   const res = editing.scope === 'occurrence'
-    ? await cal('occurrenceSkip', { eventId: editing.id, day: editing.seriesDay })
-    : await cal('eventDelete', { id: editing.id });
+    ? await api('occurrenceSkip', { eventId: editing.id, day: editing.seriesDay })
+    : await api('eventDelete', { id: editing.id });
   if (!res.ok) { $('calFormError').hidden = false; $('calFormError').textContent = res.error; return; }
   closeEditor();
   await renderCalendar(currentView(), currentArg());
@@ -309,7 +306,7 @@ $('calRepeat').addEventListener('change', syncFormBits);
 
 $('calSync').addEventListener('click', async () => {
   $('calSync').disabled = true;
-  const res = await cal('officeRefresh', {});
+  const res = await api('officeRefresh', {});
   $('calSync').disabled = false;
   if (!res.ok) { $('calOfficeAge').hidden = false; $('calOfficeAge').textContent = res.error; return; }
   await renderCalendar(currentView(), currentArg());
@@ -328,7 +325,7 @@ function renderCatList() {
 }
 
 async function saveCat(id, name, color) {
-  const res = await cal('calCategorySave', { id, name, color });
+  const res = await api('calCategorySave', { id, name, color });
   $('calCatError').hidden = res.ok;
   if (!res.ok) { $('calCatError').textContent = res.error; return false; }
   await renderCalendar(currentView(), currentArg());
@@ -345,7 +342,7 @@ $('calCatList').addEventListener('click', async (ev) => {
   if (!ev.target.matches('[data-retire]')) return;
   const row = ev.target.closest('.cal-cat');
   if (!window.confirm('Retire this category? Events already using it keep it.')) return;
-  const res = await cal('calCategoryRetire', { id: row.dataset.id });
+  const res = await api('calCategoryRetire', { id: row.dataset.id });
   $('calCatError').hidden = res.ok;
   if (!res.ok) { $('calCatError').textContent = res.error; return; }
   await renderCalendar(currentView(), currentArg());

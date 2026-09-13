@@ -1,30 +1,13 @@
 // The morning email: today and the next two days, one message per person.
 // Email has no custom properties, so every color is written inline.
 import { listSeries, listExceptions, listOfficeItems } from './caldb.js';
-import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday } from './recur.js';
+import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, timeLabel } from './recur.js';
 
 const WEEKDAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 const DEFAULT_COLOR = '#8d9bb5';
 
 const esc = (v) => String(v == null ? '' : v).replace(/[&<>"']/g, (c) =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-
-const clock = (mins) => {
-  const m = ((mins % 1440) + 1440) % 1440;
-  const h = Math.floor(m / 60);
-  return { text: (h % 12 === 0 ? 12 : h % 12) + ':' + ('0' + (m % 60)).slice(-2), meridiem: h < 12 ? 'AM' : 'PM' };
-};
-
-export function timeLabel(time, minutes) {
-  if (!time) return 'All day';
-  const start = +time.slice(0, 2) * 60 + +time.slice(3, 5);
-  const a = clock(start);
-  if (!minutes) return a.text + ' ' + a.meridiem;
-  const b = clock(start + minutes);
-  return a.meridiem === b.meridiem
-    ? a.text + ' – ' + b.text + ' ' + b.meridiem
-    : a.text + ' ' + a.meridiem + ' – ' + b.text + ' ' + b.meridiem;
-}
 
 // Read the three days the calendar needs, from both sources.
 export async function gatherDigest(sql, today, deps) {
