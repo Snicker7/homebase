@@ -61,6 +61,7 @@ them off the habits path entirely.
 | `supabase/functions/_shared/recur.js` | Pure occurrence expansion. Imported by both the browser and `dispatch`. |
 | `supabase/functions/_shared/recur.test.js` | The heaviest tests in the phase. |
 | `supabase/functions/_shared/caldb.js` | Event and category SQL. |
+| `supabase/functions/_shared/caldb.test.js` | Those queries against the local database, gated on `DB_URL`. |
 | `supabase/functions/_shared/calactions.js` | Action list and validators. |
 | `supabase/functions/_shared/officefeed.js` | Fetch, normalize, and upsert the office feed. |
 | `supabase/functions/_shared/caldigest.js` | Gather three days and render the email. |
@@ -344,6 +345,9 @@ button that calls `officeRefresh`.
   a day of nothing but waiting-on-client items.
 - `supabase/tests/0004_calendar.sql` asserts the schema and that an
   anonymous read returns nothing.
+- `caldb.test.js` runs the queries that carry logic — the padded overlap
+  window, the two delete branches of a feed window, the exception upsert —
+  against the local database, and skips when `DB_URL` is unset.
 - The screen is tested by hand, as the rest of the frontend is.
 
 ## Migration from Google Calendar

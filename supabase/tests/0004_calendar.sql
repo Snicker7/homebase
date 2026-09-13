@@ -1,5 +1,5 @@
 begin;
-select plan(20);
+select plan(18);
 
 select has_table('public', 'event_categories', 'event_categories exists');
 select has_table('public', 'events', 'events exists');
@@ -53,28 +53,9 @@ select is((select count(*)::int from public.event_exceptions), 0, 'authenticated
 select is((select count(*)::int from public.office_items), 0, 'authenticated reads office_items');
 reset role;
 
--- A series can start after the window it is drawn in, because an exception
--- moved one of its occurrences back into it. The reader pads the window it
--- selects over by recur.js's PAD_DAYS for exactly this; without the pad the day
--- view and the morning email come back empty for a day the month grid draws.
-insert into public.events (id, title, category_id, day, repeat, created_by) values
-  ('22222222-2222-2222-2222-222222222222', 'Practice', 'family', '2026-10-05',
-   '{"freq":"weekly","days":[1]}'::jsonb, 'ann@x.com');
-insert into public.event_exceptions (event_id, day, override) values
-  ('22222222-2222-2222-2222-222222222222', '2026-10-05', '{"day":"2026-09-28"}'::jsonb);
-
-select is(
-  (select count(*)::int from public.events
-    where day <= date '2026-09-28'
-      and (case when repeat is null then day >= date '2026-09-28'
-                else repeat_until is null or repeat_until >= date '2026-09-28' end)),
-  0, 'the drawn window alone would drop the series');
-select is(
-  (select count(*)::int from public.events
-    where day <= date '2026-09-28' + 31
-      and (case when repeat is null then day >= date '2026-09-28' - 31
-                else repeat_until is null or repeat_until >= date '2026-09-28' - 31 end)),
-  1, 'the padded window listSeries uses selects it');
+-- The padded-window predicate belongs to listSeries and is asserted against the
+-- real function in caldb.test.js. A copy of it here would pass while caldb.js
+-- said something else.
 
 select * from finish();
 rollback;
