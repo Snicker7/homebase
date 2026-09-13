@@ -59,7 +59,7 @@ test('a monthly rule skips months that lack the day rather than sliding', () => 
 
 test('a yearly rule on 29 February skips common years', () => {
   const s = series({ day: '2028-02-29', repeat: { freq: 'yearly' } });
-  assert.deepStrictEqual(days(expandSeries(s, [], '2028-01-01', '2033-12-31')),
+  assert.deepStrictEqual(days(expandSeries(s, [], '2028-01-01', '2032-12-31')),
     ['2028-02-29', '2032-02-29']);
 });
 

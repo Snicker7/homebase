@@ -7,7 +7,7 @@
 
 const DAY_MS = 86400000;
 // Five years. A typo in repeat_until must not become an infinite loop.
-export const MAX_WINDOW_DAYS = 2200;
+export const MAX_WINDOW_DAYS = 1830;
 
 const utc = (day) => Date.UTC(+day.slice(0, 4), +day.slice(5, 7) - 1, +day.slice(8, 10));
 const pad = (n) => (n < 10 ? '0' : '') + n;
