@@ -15,8 +15,9 @@ let CATS = {};
 let LAST_ITEMS = [];
 
 // What the form needs about a series that an occurrence alone cannot say: the
-// real anchor day, and the rule in full. An occurrence carries the date the
-// rule produced, which is not the date the series starts.
+// stored row. An occurrence carries whatever the rule produced and an exception
+// then overrode — a different day, title, time, category — and none of that is
+// what an edit of the whole series acts on.
 const SERIES = new Map();
 
 async function loadCategories() {
@@ -56,7 +57,7 @@ async function loadWindow(from, to) {
     id: r.id, title: r.title, notes: r.notes, categoryId: r.category_id,
     day: r.day, time: r.time, minutes: r.minutes, repeat: r.repeat, repeatUntil: r.repeat_until,
   }));
-  for (const s of mine) SERIES.set(s.id, { day: s.day, repeat: s.repeat, repeatUntil: s.repeatUntil });
+  for (const s of mine) SERIES.set(s.id, s);
   const items = sortOccurrences(expandAll(mine, exceptions, from, to).concat(office.data.map(officeOccurrence)));
   LAST_ITEMS = items;
   return { items, office: office.data };
@@ -170,25 +171,29 @@ let editing = null; // { id, seriesDay, scope: 'series' | 'occurrence' }
 
 function openEditor(occurrence) {
   const e = occurrence;
-  const series = e ? SERIES.get(e.eventId) : null;
-  editing = e ? { id: e.eventId, seriesDay: e.seriesDay, title: e.title, scope: 'series' } : null;
+  // The form opens on the series as it is stored. An occurrence edit substitutes
+  // the fields an exception may override below, once the scope is known; a
+  // series edit must never carry one occurrence's override back onto the rest.
+  const series = e ? SERIES.get(e.eventId) || e : null;
+  editing = e ? { id: e.eventId, seriesDay: e.seriesDay, title: series.title, scope: 'series' } : null;
   $('calFormError').hidden = true;
   $('calId').value = e ? e.eventId : '';
-  $('calTitleInput').value = e ? e.title : '';
-  $('calNotes').value = e ? e.notes : '';
-  // A series edit acts on the series' own start date; an occurrence edit
-  // substitutes the occurrence's date below, once the scope is known.
-  $('calDay').value = e ? (series ? series.day : e.day) : denverToday();
-  $('calAllDay').checked = !e || !e.time;
-  $('calTime').value = e && e.time ? e.time : '09:00';
-  $('calMinutes').value = e && e.minutes ? e.minutes : 60;
+  $('calTitleInput').value = e ? series.title : '';
+  $('calNotes').value = e ? series.notes || '' : '';
+  $('calDay').value = e ? series.day : denverToday();
+  $('calAllDay').checked = !e || !series.time;
+  $('calTime').value = e && series.time ? series.time : '09:00';
+  $('calMinutes').value = e && series.minutes ? series.minutes : 60;
   // A retired category leaves the picker but keeps its events, so an edit that
-  // never touched the category needs an option to round-trip through.
+  // never touched the category needs an option to round-trip through — the
+  // series' own, and the one an occurrence edit may substitute for it.
   const options = Object.values(CATS).filter((c) => c.active && !c.system);
-  if (e && CATS[e.categoryId] && !options.some((c) => c.id === e.categoryId)) options.push(CATS[e.categoryId]);
+  for (const id of e ? [series.categoryId, e.categoryId] : []) {
+    if (CATS[id] && !options.some((c) => c.id === id)) options.push(CATS[id]);
+  }
   $('calCategory').innerHTML = options
     .map((c) => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
-  if (e) $('calCategory').value = e.categoryId;
+  if (e) $('calCategory').value = series.categoryId;
   $('calRepeat').value = series && series.repeat ? series.repeat.freq : '';
   $('calUntil').value = series && series.repeatUntil ? series.repeatUntil : '';
   $('calDelete').hidden = !e;
@@ -332,10 +337,19 @@ $('calBody').addEventListener('click', async (ev) => {
   const scope = await askScope(found);
   openEditor(found);
   editing.scope = scope;
-  // A whole-series edit keeps the anchor day openEditor already seeded; an
-  // occurrence edit is about this one date, so it overrides that back.
+  // A whole-series edit keeps the stored values openEditor seeded; an occurrence
+  // edit is about this one date, so everything an exception may override comes
+  // from the occurrence instead. These are OVERRIDABLE, in one place.
   if (scope === 'occurrence') {
+    $('calTitleInput').value = found.title;
+    $('calNotes').value = found.notes || '';
+    $('calCategory').value = found.categoryId;
     $('calDay').value = found.day;
+    $('calAllDay').checked = !found.time;
+    $('calTime').value = found.time || '09:00';
+    $('calMinutes').value = found.minutes || 60;
+    // The all-day tick moved with them, so the timed fields have to follow it.
+    syncFormBits();
     // The expander only reaches PAD_DAYS past a view's edge, so a longer move
     // would leave the occurrence in no view at all. Say so in the picker rather
     // than at the far end of a round trip.
