@@ -43,7 +43,7 @@ export function groupByDay(occurrences) {
     if (!byDay.has(o.day)) byDay.set(o.day, []);
     byDay.get(o.day).push(o);
   }
-  // Convert to array and sort by day for consistent ascending order
+  // Occurrences arrive sorted in practice; grouping should not depend on it.
   return Array.from(byDay.entries())
     .sort(([dayA], [dayB]) => dayA < dayB ? -1 : dayA > dayB ? 1 : 0)
     .map(([day, items]) => ({ day, items }));
