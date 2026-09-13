@@ -28,7 +28,7 @@ test('shiftMonth walks across year ends', () => {
   assert.strictEqual(shiftMonth('2026-01', -1), '2025-12');
 });
 
-test('groupByDay buckets by day in date order and gives a gap no bucket', () => {
+test('groupByDay buckets by day in date order, whatever order they arrive', () => {
   const out = groupByDay([
     { day: '2026-09-15', title: 'a' }, { day: '2026-09-17', title: 'b' }, { day: '2026-09-15', title: 'c' },
   ]);
