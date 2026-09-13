@@ -18,6 +18,7 @@
           <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
           <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
           <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
+          <a id="navCalendar" class="link-btn" href="#/calendar" hidden>Calendar</a>
           <button id="manageBtn" class="link-btn" hidden>Categories</button>
           <button id="logoutBtn" class="link-btn" hidden>Log out</button>
         </div>
@@ -271,6 +272,24 @@
         <p id="budgetMeta" class="muted" hidden></p>
         <div id="budgetList"></div>
         <p id="budgetEmpty" class="muted" hidden></p>
+      </section>
+
+      <!-- CALENDAR: family events, read-only until Task 7's editor -->
+      <section id="calendarView" class="card" hidden>
+        <div class="row cal-head">
+          <div class="seg">
+            <button id="calTabAgenda" type="button" class="ghost">Agenda</button>
+            <button id="calTabMonth" type="button" class="ghost">Month</button>
+          </div>
+          <div class="row cal-nav">
+            <button id="calPrev" type="button" class="ghost" hidden>‹</button>
+            <span id="calTitle" class="cal-title"></span>
+            <button id="calNext" type="button" class="ghost" hidden>›</button>
+          </div>
+          <button id="calToday" type="button" class="ghost">Today</button>
+        </div>
+        <p id="calOfficeAge" class="muted cal-age" hidden></p>
+        <div id="calBody"></div>
       </section>
 
       <footer class="foot muted">Build the habit, bank the reward 🌱</footer>
