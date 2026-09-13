@@ -66,6 +66,13 @@ export async function bank(action, extra) {
   return post('plaid', Object.assign({ action }, extra || {}), session.access_token);
 }
 
+// Calendar writes. Reads go straight to Postgres under RLS like every other screen.
+export async function cal(action, extra) {
+  const session = await getSession();
+  if (!session) return { ok: false, error: 'not authorized — please log in again' };
+  return post('api', Object.assign({ action }, extra || {}), session.access_token);
+}
+
 export async function requestLogin(email) {
   if (!supabase) throw new Error('Backend not configured');
   const { error } = await supabase.auth.signInWithOtp({
