@@ -24,5 +24,8 @@ export function readEnv() {
     plaidClientId: get('PLAID_CLIENT_ID', ''),
     plaidSecret: get('PLAID_SECRET', ''),
     plaidEnv: get('PLAID_ENV', 'sandbox'),
+    // Empty default: the calendar import is the only caller, and every other
+    // function must keep booting before the token is set.
+    keepsiteFeedToken: get('KEEPSITE_FEED_TOKEN', ''),
   };
 }

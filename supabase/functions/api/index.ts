@@ -7,6 +7,10 @@ import { createService } from '../_shared/service.js';
 import { createResendMailer } from '../_shared/mail.js';
 import * as bank from '../_shared/bankdb.js';
 import { BANK_ACTIONS, validateCategorize, validateCategory } from '../_shared/bankactions.js';
+import * as cal from '../_shared/caldb.js';
+import { CAL_ACTIONS, validateEvent, validateOccurrence, validateEventCategory, validateId } from '../_shared/calactions.js';
+import { importFeed } from '../_shared/officefeed.js';
+import { tzDate } from '../_shared/clock.js';
 
 const env = readEnv();
 const sql = postgres(env.dbUrl, { max: 2, prepare: false });
@@ -67,6 +71,58 @@ Deno.serve(async (req) => {
       // Two failures are the caller's doing rather than ours; say so plainly.
       if (/duplicate key/.test(msg)) return json({ ok: false, error: 'that category already exists' }, 500, cors);
       if (/foreign key/.test(msg)) return json({ ok: false, error: 'unknown category' }, 400, cors);
+      return json({ ok: false, error: msg }, 500, cors);
+    }
+  }
+
+  // Calendar actions carry no reward rule either, so they take the same road as
+  // the bank ones: no snapshot, no advisory lock.
+  if (CAL_ACTIONS.includes(String(p.action))) {
+    try {
+      if (p.action === 'eventSave') {
+        const v = validateEvent(p);
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        const id = await cal.saveEvent(sql, Object.assign({}, v, { user: p.user }));
+        if (!id) return json({ ok: false, error: 'unknown event' }, 404, cors);
+        return json({ ok: true, id }, 200, cors);
+      }
+      if (p.action === 'eventDelete') {
+        const v = validateId(p);
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        const hit = await cal.deleteEvent(sql, v.id);
+        return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'unknown event' }, 404, cors);
+      }
+      if (p.action === 'occurrenceSkip' || p.action === 'occurrenceSave') {
+        // The action decides; a `skipped` field in the payload must not turn an
+        // edit into a silent delete.
+        const v = validateOccurrence(Object.assign({}, p, { skipped: p.action === 'occurrenceSkip' }));
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        const hit = await cal.saveOccurrence(sql, v);
+        return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'unknown event' }, 404, cors);
+      }
+      if (p.action === 'calCategorySave') {
+        const v = validateEventCategory(p);
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        await cal.saveCategory(sql, v);
+        return json({ ok: true, category: v }, 200, cors);
+      }
+      if (p.action === 'calCategoryRetire') {
+        const v = validateId(p);
+        if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
+        const hit = await cal.retireCategory(sql, v.id);
+        return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'that category is reserved for the office' }, 400, cors);
+      }
+      if (p.action === 'officeRefresh') {
+        if (!env.keepsiteFeedToken) return json({ ok: false, error: 'the office feed token is not set' }, 400, cors);
+        const today = tzDate(new Date());
+        const out = await importFeed(sql, { token: env.keepsiteFeedToken, today });
+        return json({ ok: out.failures.length === 0, imported: out.imported, error: out.failures[0] }, 200, cors);
+      }
+      return json({ ok: false, error: 'unknown action' }, 400, cors);
+    } catch (e) {
+      const msg = (e as Error)?.message || String(e);
+      if (/foreign key/.test(msg)) return json({ ok: false, error: 'unknown category' }, 400, cors);
+      if (/duplicate key/.test(msg)) return json({ ok: false, error: 'that category already exists' }, 400, cors);
       return json({ ok: false, error: msg }, 500, cors);
     }
   }

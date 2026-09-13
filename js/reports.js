@@ -2,7 +2,7 @@
 // average with a pace bar. History: twelve months of bars per category with
 // the average as a line. Both read views under RLS; nothing here writes.
 import { sb } from './api.js';
-import { $, esc, money } from './util.js';
+import { $, esc, money, denverToday } from './util.js';
 import { barChart } from './chart.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -98,9 +98,8 @@ async function renderHistory(list, empty, meta) {
 // "YYYY-MM" for the last twelve calendar months, oldest first. Anchored on
 // Denver's date, not the browser's, so the keys line up with the month buckets
 // the views cut in Denver time.
-const denverDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
 function lastTwelveMonths() {
-  const [year, month] = denverDate().split('-').map(Number);
+  const [year, month] = denverToday().split('-').map(Number);
   const out = [];
   for (let back = 11; back >= 0; back--) {
     const n = month - 1 - back;
