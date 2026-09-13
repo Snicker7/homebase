@@ -40,11 +40,16 @@ export function renderDigest(days, cats, dashboardUrl) {
   if (!total) return null;
 
   const today = days[0].items;
+  // Two titles is about as much as an inbox list shows; the rest are a count,
+  // so a busy morning does not produce a subject nothing will display.
+  const SUBJECT_TITLES = 2;
+  const named = today.slice(0, SUBJECT_TITLES).map((o) => o.title).join(', ');
+  const rest = today.length - SUBJECT_TITLES;
   const subject = !today.length
     ? '📅 Nothing today · ' + days[1].items.concat(days[2].items).length + ' coming up'
     : today.length === 1
       ? '📅 ' + today[0].title
-      : '📅 ' + today.length + ' things today: ' + today.map((o) => o.title).join(', ');
+      : '📅 ' + today.length + ' things today: ' + named + (rest > 0 ? ' and ' + rest + ' more' : '');
 
   const row = (o) => {
     const color = (cats[o.categoryId] && cats[o.categoryId].color) || DEFAULT_COLOR;
