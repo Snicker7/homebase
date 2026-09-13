@@ -52,11 +52,13 @@ Deno.serve(async (req) => {
     }
   }
   // The calendar digest reads tables the habits snapshot does not carry, so it
-  // runs here rather than inside the service.
-  const hour = tzHourStr(new Date());
-  const [digestSetting] = await sql`select value #>> '{}' as v from settings where key = 'calendarDigestTime'`;
-  if ((digestSetting?.v || '07:00') === hour) {
-    try {
+  // runs here rather than inside the service. The hour gate lives inside this
+  // try too: a settings-read throw must not skip the response below and lose
+  // every failure already collected by the mail queue and office import.
+  try {
+    const hour = tzHourStr(new Date());
+    const [digestSetting] = await sql`select value #>> '{}' as v from settings where key = 'calendarDigestTime'`;
+    if ((digestSetting?.v || '07:00') === hour) {
       const today = tzDate(new Date());
       const items = await gatherDigest(sql, today);
       const cats = Object.fromEntries(
@@ -73,10 +75,10 @@ Deno.serve(async (req) => {
           }
         }
       }
-    } catch (e) {
-      result.failures.push('calendar digest — ' + ((e as Error)?.message || e));
-      result.ok = false;
     }
+  } catch (e) {
+    result.failures.push('calendar digest — ' + ((e as Error)?.message || e));
+    result.ok = false;
   }
   console.log('dispatch', JSON.stringify(result));
   // 500 on failure so the cron log shows the hour red.
