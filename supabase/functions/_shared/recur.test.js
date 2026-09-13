@@ -151,6 +151,14 @@ test('daysBetween counts whole days in both directions', () => {
   assert.strictEqual(daysBetween('2026-09-01', '2026-09-01'), 0);
 });
 
+test('a rule this module cannot expand hides its own event and nothing else', () => {
+  const bad = series({ id: 'bad', repeat: { freq: 'weekly' } });
+  const odd = series({ id: 'odd', repeat: { freq: 'fortnightly' } });
+  const good = series({ id: 'good', repeat: { freq: 'daily' }, repeatUntil: '2026-09-16' });
+  const out = expandAll([bad, odd, good], [], '2026-09-01', '2026-09-30');
+  assert.deepStrictEqual(out.map((o) => o.eventId), ['good', 'good']);
+});
+
 test('an override moved by the pad still lands in the window it moved into', () => {
   const s = series({ day: '2026-09-01', repeat: { freq: 'monthly', day: 1 } });
   const moved = addDays('2026-09-01', PAD_DAYS);

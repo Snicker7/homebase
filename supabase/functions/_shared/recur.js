@@ -55,6 +55,10 @@ function* occurrenceDays(s, from, to) {
   const r = s.repeat;
 
   if (r.freq === 'daily' || r.freq === 'weekly') {
+    // A weekly rule with no day list is a row this module cannot expand.
+    // Yielding nothing hides that one event; reading it anyway throws through
+    // expandAll and blanks every other event on the screen with it.
+    if (r.freq === 'weekly' && !Array.isArray(r.days)) return;
     for (let d = start < from ? from : start; d <= last; d = addDays(d, 1)) {
       if (r.freq === 'daily' || r.days.includes(weekday(d))) yield d;
     }
@@ -88,7 +92,10 @@ function* occurrenceDays(s, from, to) {
       const d = makeDay(y, mo, dy);
       if (d >= from && d <= last && d >= start) yield d;
     }
+    return;
   }
+  // Any other freq is a rule written by something newer than this file; it
+  // yields nothing, for the same reason a malformed weekly one does.
 }
 
 function expandUnchecked(series, exceptions, from, to) {
