@@ -14,6 +14,8 @@ const pad = (n) => (n < 10 ? '0' : '') + n;
 const makeDay = (y, m, d) => y + '-' + pad(m) + '-' + pad(d);
 
 export const addDays = (day, n) => new Date(utc(day) + n * DAY_MS).toISOString().slice(0, 10);
+// Whole days from a to b, negative when b is the earlier one.
+export const daysBetween = (a, b) => (utc(b) - utc(a)) / DAY_MS;
 // ISO weekday: Monday 1 through Sunday 7.
 export const weekday = (day) => ((new Date(utc(day)).getUTCDay() + 6) % 7) + 1;
 // month is 1-12. Day zero of the next month is the last day of this one.
@@ -107,7 +109,7 @@ function expandUnchecked(series, exceptions, from, to) {
 }
 
 export function expandSeries(series, exceptions, from, to) {
-  if ((utc(to) - utc(from)) / DAY_MS > MAX_WINDOW_DAYS) {
+  if (daysBetween(from, to) > MAX_WINDOW_DAYS) {
     throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');
   }
   return expandUnchecked(series, exceptions, from, to);
@@ -115,11 +117,12 @@ export function expandSeries(series, exceptions, from, to) {
 
 // Pad, then filter on the moved day: an override can carry an occurrence across
 // either edge of the window, in or out, and the caller asked about days rather
-// than about rules.
-const PAD_DAYS = 31;
+// than about rules. Exported because validateOccurrence refuses a move longer
+// than the pad — past it the moved occurrence would render in no window at all.
+export const PAD_DAYS = 31;
 
 export function expandAll(seriesList, exceptions, from, to) {
-  if ((utc(to) - utc(from)) / DAY_MS > MAX_WINDOW_DAYS) {
+  if (daysBetween(from, to) > MAX_WINDOW_DAYS) {
     throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');
   }
   const out = [];

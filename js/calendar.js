@@ -4,7 +4,7 @@
 // views disagree.
 import { sb, cal } from './api.js';
 import { $, esc } from './util.js';
-import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday } from '../supabase/functions/_shared/recur.js';
+import { expandAll, officeOccurrence, sortOccurrences, addDays, weekday, PAD_DAYS } from '../supabase/functions/_shared/recur.js';
 import { monthMatrix, monthBounds, monthTitle, shiftMonth, groupByDay, dayLabel, timeLabel, WEEKDAY_INITIALS } from './calgrid.js';
 
 // Denver's date, not the browser's: every day and time in this app is Denver
@@ -187,6 +187,9 @@ function openEditor(occurrence) {
   $('calRepeat').value = series && series.repeat ? series.repeat.freq : '';
   $('calUntil').value = series && series.repeatUntil ? series.repeatUntil : '';
   $('calDelete').hidden = !e;
+  // Only an occurrence edit is bounded, and the click handler sets that bound
+  // once it knows the scope; every other open must clear it again.
+  $('calDay').min = ''; $('calDay').max = '';
   // An occurrence edit hides this below; every other open must show it again,
   // since nothing else resets it.
   $('calRepeat').closest('label').hidden = false;
@@ -284,7 +287,14 @@ $('calBody').addEventListener('click', async (ev) => {
   editing.scope = scope;
   // A whole-series edit keeps the anchor day openEditor already seeded; an
   // occurrence edit is about this one date, so it overrides that back.
-  if (scope === 'occurrence') $('calDay').value = found.day;
+  if (scope === 'occurrence') {
+    $('calDay').value = found.day;
+    // The expander only reaches PAD_DAYS past a view's edge, so a longer move
+    // would leave the occurrence in no view at all. Say so in the picker rather
+    // than at the far end of a round trip.
+    $('calDay').min = addDays(found.seriesDay, -PAD_DAYS);
+    $('calDay').max = addDays(found.seriesDay, PAD_DAYS);
+  }
   // Editing one occurrence cannot change the rule, so the rule controls go away.
   $('calRepeat').closest('label').hidden = scope === 'occurrence';
   $('calUntilWrap').hidden = scope === 'occurrence' || !$('calRepeat').value;

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, weekday, daysInMonth, MAX_WINDOW_DAYS } from './recur.js';
+import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, daysBetween, weekday, daysInMonth, MAX_WINDOW_DAYS, PAD_DAYS } from './recur.js';
 
 const series = (over) => Object.assign({
   id: 'e1', title: 'Thing', notes: '', categoryId: 'family',
@@ -143,4 +143,17 @@ test('expandAll accepts a window of exactly the documented maximum and refuses o
   // The padding expandAll applies internally must not eat into the caller's allowance.
   assert.doesNotThrow(() => expandAll([s], [], from, addDays(from, MAX_WINDOW_DAYS)));
   assert.throws(() => expandAll([s], [], from, addDays(from, MAX_WINDOW_DAYS + 1)), /window/);
+});
+
+test('daysBetween counts whole days in both directions', () => {
+  assert.strictEqual(daysBetween('2026-09-01', '2026-10-02'), 31);
+  assert.strictEqual(daysBetween('2026-10-02', '2026-09-01'), -31);
+  assert.strictEqual(daysBetween('2026-09-01', '2026-09-01'), 0);
+});
+
+test('an override moved by the pad still lands in the window it moved into', () => {
+  const s = series({ day: '2026-09-01', repeat: { freq: 'monthly', day: 1 } });
+  const moved = addDays('2026-09-01', PAD_DAYS);
+  const ex = [{ eventId: 'e1', day: '2026-09-01', skipped: false, override: { day: moved } }];
+  assert.deepStrictEqual(days(expandAll([s], ex, moved, moved)), [moved]);
 });

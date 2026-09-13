@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { CAL_ACTIONS, validateEvent, validateOccurrence, validateEventCategory, validateId } from './calactions.js';
+import { addDays, PAD_DAYS } from './recur.js';
 
 const ok = (over) => Object.assign({
   title: 'Soccer', categoryId: 'family', day: '2026-09-15', time: null, minutes: null,
@@ -109,6 +110,15 @@ test('a category needs a name and a six-digit hex color', () => {
   assert.match(validateEventCategory({ name: '', color: '#aabbcc' }).error, /name/);
   assert.match(validateEventCategory({ name: 'x', color: 'red' }).error, /color/);
   assert.match(validateEventCategory({ name: '🙂', color: '#aabbcc' }).error, /letter or digit/);
+});
+
+test('an occurrence moves up to the expander pad and no further', () => {
+  const day = '2026-09-01';
+  const move = (n) => validateOccurrence({ eventId: 'e1', day, override: { day: addDays(day, n) } });
+  assert.strictEqual(move(PAD_DAYS).override.day, addDays(day, PAD_DAYS));
+  assert.strictEqual(move(-PAD_DAYS).override.day, addDays(day, -PAD_DAYS));
+  assert.match(move(PAD_DAYS + 1).error, /more than a month/);
+  assert.match(move(-(PAD_DAYS + 1)).error, /more than a month/);
 });
 
 test('validateId trims and refuses empty', () => {

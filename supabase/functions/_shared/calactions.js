@@ -1,6 +1,6 @@
 // Input checks for the calendar actions that ride on the api function. Pure, so
 // the shapes are tested without a database.
-import { weekday, daysInMonth, OVERRIDABLE } from './recur.js';
+import { weekday, daysInMonth, daysBetween, OVERRIDABLE, PAD_DAYS } from './recur.js';
 
 export const CAL_ACTIONS = [
   'eventSave', 'eventDelete', 'occurrenceSkip', 'occurrenceSave',
@@ -97,6 +97,12 @@ export function validateOccurrence(p) {
   for (const k of OVERRIDABLE) if (raw[k] !== undefined) override[k] = raw[k];
   if (!Object.keys(override).length) return { error: 'nothing to change' };
   if (override.day !== undefined && !isDay(override.day)) return { error: 'date must be a real YYYY-MM-DD date' };
+  // The expander only looks PAD_DAYS either side of the window it was asked
+  // about, so an occurrence dragged further than that lands in no view and in
+  // no email, with no row left on screen to drag it back.
+  if (override.day !== undefined && Math.abs(daysBetween(day, override.day)) > PAD_DAYS) {
+    return { error: 'move it more than a month away and it needs to be its own event' };
+  }
   if (override.time !== undefined && override.time !== null && !isTime(override.time)) return { error: 'time must be HH:MM' };
   // The override merges onto the series, and this validator cannot see the
   // series; requiring the pair together is what keeps a timed occurrence from
