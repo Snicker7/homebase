@@ -62,10 +62,15 @@ export async function saveOccurrence(sql, o) {
   return rows.length > 0;
 }
 
+// The update list leaves `sort` alone: a color or name edit is not a reorder,
+// and rewriting it would collapse the seeded order to one value. `active` comes
+// back on, so adding a category by the name of a retired one un-retires it
+// rather than silently updating a row that stays hidden.
 export async function saveCategory(sql, c) {
+  const sort = c.sort == null ? 100 : c.sort;
   await sql`
-    insert into event_categories (id, name, color, sort) values (${c.id}, ${c.name}, ${c.color}, ${c.sort})
-    on conflict (id) do update set name = excluded.name, color = excluded.color, sort = excluded.sort`;
+    insert into event_categories (id, name, color, sort) values (${c.id}, ${c.name}, ${c.color}, ${sort})
+    on conflict (id) do update set name = excluded.name, color = excluded.color, active = true`;
 }
 
 // Retiring keeps the events that already point at the category; only the picker

@@ -108,10 +108,15 @@ test('override validations are enforced', () => {
 
 test('a category needs a name and a six-digit hex color', () => {
   assert.deepStrictEqual(validateEventCategory({ name: 'Vet visits', color: '#AABBCC' }),
-    { id: 'vet-visits', name: 'Vet visits', color: '#aabbcc', sort: 100 });
+    { id: 'vet-visits', name: 'Vet visits', color: '#aabbcc' });
   assert.match(validateEventCategory({ name: '', color: '#aabbcc' }).error, /name/);
   assert.match(validateEventCategory({ name: 'x', color: 'red' }).error, /color/);
   assert.match(validateEventCategory({ name: '🙂', color: '#aabbcc' }).error, /letter or digit/);
+});
+
+test('a category edit that sent no sort carries no sort to the database', () => {
+  assert.ok(!('sort' in validateEventCategory({ id: 'family', name: 'Family', color: '#57c785' })));
+  assert.strictEqual(validateEventCategory({ id: 'family', name: 'Family', color: '#57c785', sort: 20 }).sort, 20);
 });
 
 test('an occurrence moves up to the expander pad and no further', () => {

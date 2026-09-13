@@ -140,8 +140,12 @@ export function validateEventCategory(p) {
   if (!/^#[0-9a-f]{6}$/.test(color)) return { error: 'color must be a #rrggbb hex' };
   const id = p.id ? slug(p.id) : slug(name);
   if (!id) return { error: 'name needs a letter or digit' };
-  const sort = Number.isInteger(Number(p.sort)) ? Number(p.sort) : 100;
-  return { id, name, color, sort };
+  // A caller that did not send a sort is editing a name or a color, not the
+  // order; omitting the field is what lets the write leave the order alone.
+  const hasSort = p.sort !== undefined && p.sort !== null && p.sort !== '';
+  if (!hasSort) return { id, name, color };
+  if (!Number.isInteger(Number(p.sort))) return { error: 'sort must be a whole number' };
+  return { id, name, color, sort: Number(p.sort) };
 }
 
 export function validateId(p) {
