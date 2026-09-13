@@ -91,7 +91,9 @@ Deno.serve(async (req) => {
         return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'unknown event' }, 404, cors);
       }
       if (p.action === 'occurrenceSkip' || p.action === 'occurrenceSave') {
-        const v = validateOccurrence(p.action === 'occurrenceSkip' ? Object.assign({}, p, { skipped: true }) : p);
+        // The action decides; a `skipped` field in the payload must not turn an
+        // edit into a silent delete.
+        const v = validateOccurrence(Object.assign({}, p, { skipped: p.action === 'occurrenceSkip' }));
         if ('error' in v) return json({ ok: false, error: v.error }, 400, cors);
         const hit = await cal.saveOccurrence(sql, v);
         return hit ? json({ ok: true }, 200, cors) : json({ ok: false, error: 'unknown event' }, 404, cors);
