@@ -74,3 +74,35 @@ test('a multi-day all-day event is skipped, not truncated to its first day', () 
   assert.strictEqual(out.events.length, 0);
   assert.match(out.skipped[0].why, /multiple days/);
 });
+
+// A YEARLY rule anchored on BYMONTH+BYDAY (the shape every US holiday
+// calendar uses for Thanksgiving) must not flatten to DTSTART's literal
+// month and day — that silently drops both qualifiers.
+test('a yearly rule with BYMONTH and BYDAY is skipped, not flattened', () => {
+  const out = parseIcs(ics(vevent(['SUMMARY:Thanksgiving', 'DTSTART;VALUE=DATE:20261126', 'RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=4TH'])));
+  assert.strictEqual(out.events.length, 0);
+  assert.match(out.skipped[0].why, /BYMONTH/);
+});
+
+// A DAILY rule with BYDAY ("every weekday") must not become true daily,
+// which would silently add the weekends back in.
+test('a daily rule with BYDAY is skipped, not treated as every day', () => {
+  const out = parseIcs(ics(vevent(['SUMMARY:Weekdays', 'DTSTART;VALUE=DATE:20260915', 'RRULE:FREQ=DAILY;BYDAY=MO,TU,WE,TH,FR'])));
+  assert.strictEqual(out.events.length, 0);
+  assert.match(out.skipped[0].why, /BYDAY/);
+});
+
+// A timed value outside Denver needs real timezone conversion to import at
+// the right wall-clock time; the script never converts, so it must refuse
+// rather than import two hours wrong.
+test('a timed event in another time zone is refused, not shifted', () => {
+  const out = parseIcs(ics(vevent(['SUMMARY:Flight', 'DTSTART;TZID=America/New_York:20260915T090000', 'DTEND;TZID=America/New_York:20260915T110000'])));
+  assert.strictEqual(out.events.length, 0);
+  assert.match(out.skipped[0].why, /America\/New_York/);
+});
+
+test('a UTC (Z) timed event is refused, not treated as Denver wall-clock', () => {
+  const out = parseIcs(ics(vevent(['SUMMARY:Webinar', 'DTSTART:20260915T160000Z', 'DTEND:20260915T170000Z'])));
+  assert.strictEqual(out.events.length, 0);
+  assert.match(out.skipped[0].why, /UTC/);
+});
