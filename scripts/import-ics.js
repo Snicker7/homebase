@@ -100,6 +100,16 @@ export function parseIcs(text) {
     if (!start) { skipped.push({ title, day: '', why: 'no start date' }); continue; }
     const rawStart = value(start);
     const day = ymd(rawStart);
+    // Google writes one edited instance of a series as a second VEVENT sharing
+    // the parent's UID and carrying RECURRENCE-ID, and adds no EXDATE to the
+    // parent because RFC 5545 has this instance replace the generated one.
+    // Importing it as its own event would put the occurrence on the calendar
+    // twice, at the old time and the new. Turning it into an exception row
+    // means matching UIDs across blocks, which is a feature, not a fix.
+    if (get('RECURRENCE-ID')) {
+      skipped.push({ title, day, why: 'a single changed occurrence of a repeating event; re-enter the change by hand' });
+      continue;
+    }
     const allDay = /VALUE=DATE(?!-TIME)/.test(start);
     if (!allDay) {
       const startZoneWhy = zoneWhy(start);

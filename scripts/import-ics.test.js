@@ -106,3 +106,15 @@ test('a UTC (Z) timed event is refused, not treated as Denver wall-clock', () =>
   assert.strictEqual(out.events.length, 0);
   assert.match(out.skipped[0].why, /UTC/);
 });
+
+test('an edited instance of a series is reported, not imported alongside its parent', () => {
+  const parent = vevent(['UID:abc@google.com', 'SUMMARY:Soccer', 'DTSTART;VALUE=DATE:20260915', 'RRULE:FREQ=WEEKLY;BYDAY=TU']);
+  const moved = vevent(['UID:abc@google.com', 'SUMMARY:Soccer', 'RECURRENCE-ID;VALUE=DATE:20260922',
+    'DTSTART;VALUE=DATE:20260924']);
+  const out = parseIcs(ics(parent + moved));
+  assert.strictEqual(out.events.length, 1, 'only the series itself imports');
+  assert.strictEqual(out.events[0].day, '2026-09-15');
+  assert.strictEqual(out.skipped.length, 1);
+  assert.strictEqual(out.skipped[0].day, '2026-09-24');
+  assert.match(out.skipped[0].why, /changed occurrence/);
+});

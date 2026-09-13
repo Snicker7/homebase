@@ -176,6 +176,9 @@ trailing average; the History view shows twelve months of bars per category.
      span field
    - a timed event longer than 24 hours, since only all-day events can span
      days
+   - a single occurrence Google moved or edited on its own (the `VEVENT`
+     carries `RECURRENCE-ID`), since importing it beside its unchanged parent
+     would show that occurrence twice, at the old time and the new
 
    `--apply` refuses to run a second time against a category that already
    has events — pass `--again` to import anyway. Then turn off Google
