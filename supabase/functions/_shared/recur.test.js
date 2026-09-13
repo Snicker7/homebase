@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
-import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, weekday, daysInMonth } from './recur.js';
+import { expandAll, expandSeries, officeOccurrence, sortOccurrences, addDays, weekday, daysInMonth, MAX_WINDOW_DAYS } from './recur.js';
 
 const series = (over) => Object.assign({
   id: 'e1', title: 'Thing', notes: '', categoryId: 'family',
@@ -135,4 +135,12 @@ test('sorting puts all-day items before timed ones, then by time, then by title'
     at('2026-09-15', null, 'Zebra'), at('2026-09-15', null, 'Apple'), at('2026-09-15', '09:00', 'Early'),
   ]);
   assert.deepStrictEqual(out.map((o) => o.title), ['Apple', 'Zebra', 'Early', 'Late', 'B']);
+});
+
+test('expandAll accepts a window of exactly the documented maximum and refuses one day more', () => {
+  const s = series({ repeat: { freq: 'daily' } });
+  const from = '2026-01-01';
+  // The padding expandAll applies internally must not eat into the caller's allowance.
+  assert.doesNotThrow(() => expandAll([s], [], from, addDays(from, MAX_WINDOW_DAYS)));
+  assert.throws(() => expandAll([s], [], from, addDays(from, MAX_WINDOW_DAYS + 1)), /window/);
 });

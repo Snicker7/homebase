@@ -89,10 +89,7 @@ function* occurrenceDays(s, from, to) {
   }
 }
 
-export function expandSeries(series, exceptions, from, to) {
-  if ((utc(to) - utc(from)) / DAY_MS > MAX_WINDOW_DAYS) {
-    throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');
-  }
+function expandUnchecked(series, exceptions, from, to) {
   const ex = new Map();
   for (const e of exceptions) if (e.eventId === series.id) ex.set(e.day, e);
   const out = [];
@@ -109,15 +106,25 @@ export function expandSeries(series, exceptions, from, to) {
   return out;
 }
 
+export function expandSeries(series, exceptions, from, to) {
+  if ((utc(to) - utc(from)) / DAY_MS > MAX_WINDOW_DAYS) {
+    throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');
+  }
+  return expandUnchecked(series, exceptions, from, to);
+}
+
 // Pad, then filter on the moved day: an override can carry an occurrence across
 // either edge of the window, in or out, and the caller asked about days rather
 // than about rules.
 const PAD_DAYS = 31;
 
 export function expandAll(seriesList, exceptions, from, to) {
+  if ((utc(to) - utc(from)) / DAY_MS > MAX_WINDOW_DAYS) {
+    throw new Error('window wider than ' + MAX_WINDOW_DAYS + ' days');
+  }
   const out = [];
   for (const s of seriesList) {
-    for (const o of expandSeries(s, exceptions, addDays(from, -PAD_DAYS), addDays(to, PAD_DAYS))) {
+    for (const o of expandUnchecked(s, exceptions, addDays(from, -PAD_DAYS), addDays(to, PAD_DAYS))) {
       if (o.day >= from && o.day <= to) out.push(o);
     }
   }
