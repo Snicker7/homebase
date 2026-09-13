@@ -1,6 +1,6 @@
 // Input checks for the calendar actions that ride on the api function. Pure, so
 // the shapes are tested without a database.
-import { weekday, daysInMonth } from './recur.js';
+import { weekday, daysInMonth, OVERRIDABLE } from './recur.js';
 
 export const CAL_ACTIONS = [
   'eventSave', 'eventDelete', 'occurrenceSkip', 'occurrenceSave',
@@ -85,8 +85,6 @@ export function validateEvent(p) {
   };
 }
 
-const OVERRIDABLE = ['title', 'notes', 'categoryId', 'day', 'time', 'minutes'];
-
 export function validateOccurrence(p) {
   const eventId = String(p.eventId || '').trim();
   const day = String(p.day || '').trim();
@@ -100,6 +98,26 @@ export function validateOccurrence(p) {
   if (!Object.keys(override).length) return { error: 'nothing to change' };
   if (override.day !== undefined && !isDay(override.day)) return { error: 'date must be a real YYYY-MM-DD date' };
   if (override.time !== undefined && override.time !== null && !isTime(override.time)) return { error: 'time must be HH:MM' };
+  // The override merges onto the series, and this validator cannot see the
+  // series; requiring the pair together is what keeps a timed occurrence from
+  // losing its duration, the way the events table's own check does.
+  const touchesTime = override.time !== undefined;
+  const touchesMinutes = override.minutes !== undefined;
+  if (touchesTime !== touchesMinutes) return { error: 'change the time and the length together' };
+  if (touchesMinutes && override.minutes !== null) {
+    const m = Number(override.minutes);
+    if (!Number.isInteger(m) || m < 1 || m > 1440) return { error: 'length must be between 1 and 1440 minutes' };
+    override.minutes = m;
+  }
+  if (touchesTime && override.time === null && override.minutes !== null) {
+    return { error: 'an all-day event has no length' };
+  }
+  if (override.categoryId !== undefined && !String(override.categoryId).trim()) return { error: 'category required' };
+  if (override.notes !== undefined) {
+    const n = String(override.notes).trim();
+    if (n.length > MAX_NOTES) return { error: 'notes must be ' + MAX_NOTES + ' characters or fewer' };
+    override.notes = n;
+  }
   if (override.title !== undefined) {
     const t = String(override.title).trim();
     if (!t) return { error: 'title required' };

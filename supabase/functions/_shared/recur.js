@@ -19,7 +19,7 @@ export const weekday = (day) => ((new Date(utc(day)).getUTCDay() + 6) % 7) + 1;
 // month is 1-12. Day zero of the next month is the last day of this one.
 export const daysInMonth = (year, month) => new Date(Date.UTC(year, month, 0)).getUTCDate();
 
-const OVERRIDABLE = ['title', 'notes', 'categoryId', 'day', 'time', 'minutes'];
+export const OVERRIDABLE = ['title', 'notes', 'categoryId', 'day', 'time', 'minutes'];
 
 function occurrence(s, day) {
   return {

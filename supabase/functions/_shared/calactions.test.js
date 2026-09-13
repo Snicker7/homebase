@@ -79,6 +79,30 @@ test('an occurrence change names its event and its original day', () => {
   assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { colour: 'red' } }).error, /nothing to change/);
 });
 
+test('override validations are enforced', () => {
+  // time without minutes rejected
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: '09:00' } }).error, /time and the length together/);
+  // minutes without time rejected
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { minutes: 30 } }).error, /time and the length together/);
+  // both together accepted
+  const both = validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: '09:00', minutes: 30 } });
+  assert.strictEqual(both.override.time, '09:00');
+  assert.strictEqual(both.override.minutes, 30);
+  // { time: null, minutes: null } accepted as all-day
+  const allDay = validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: null, minutes: null } });
+  assert.strictEqual(allDay.override.time, null);
+  assert.strictEqual(allDay.override.minutes, null);
+  // minutes out of bounds rejected
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: '09:00', minutes: 0 } }).error, /1 and 1440/);
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: '09:00', minutes: 2000 } }).error, /1 and 1440/);
+  // time: null and minutes: not-null is all-day with duration error
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { time: null, minutes: 30 } }).error, /all-day event has no length/);
+  // over-long notes rejected
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { title: 'x', notes: 'x'.repeat(2001) } }).error, /notes must be 2000/);
+  // empty categoryId rejected
+  assert.match(validateOccurrence({ eventId: 'e1', day: '2026-09-22', override: { title: 'x', categoryId: '' } }).error, /category required/);
+});
+
 test('a category needs a name and a six-digit hex color', () => {
   assert.deepStrictEqual(validateEventCategory({ name: 'Vet visits', color: '#AABBCC' }),
     { id: 'vet-visits', name: 'Vet visits', color: '#aabbcc', sort: 100 });
