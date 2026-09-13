@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert';
+import { readFileSync } from 'node:fs';
 import { CAL_ACTIONS, validateEvent, validateOccurrence, validateEventCategory, validateId } from './calactions.js';
 import { addDays, PAD_DAYS } from './recur.js';
 
@@ -8,10 +9,11 @@ const ok = (over) => Object.assign({
 }, over);
 
 test('the action list is what api routes on', () => {
-  assert.deepStrictEqual(CAL_ACTIONS, [
-    'eventSave', 'eventDelete', 'occurrenceSkip', 'occurrenceSave',
-    'calCategorySave', 'calCategoryRetire', 'officeRefresh',
-  ]);
+  // Asserting the list against a copy of itself passes whether or not `api`
+  // routes any of it; read the branches instead.
+  const source = readFileSync(new URL('../api/index.ts', import.meta.url), 'utf8');
+  const routed = [...source.matchAll(/p\.action === '([a-zA-Z]+)'/g)].map((m) => m[1]);
+  for (const action of CAL_ACTIONS) assert.ok(routed.includes(action), action + ' is not routed by api/index.ts');
 });
 
 test('a minimal all-day event validates and normalizes', () => {
