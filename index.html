@@ -274,7 +274,7 @@
         <p id="budgetEmpty" class="muted" hidden></p>
       </section>
 
-      <!-- CALENDAR: family events, read-only until Task 7's editor -->
+      <!-- CALENDAR: the family calendar — views, editor, and categories -->
       <section id="calendarView" class="card" hidden>
         <div class="row cal-head">
           <div class="seg">
@@ -295,6 +295,7 @@
         <div id="calEditor" class="cal-editor" hidden>
           <form id="calForm">
             <input type="hidden" id="calId" />
+            <p id="calScope" class="muted cal-scope" hidden></p>
             <label>Title <input id="calTitleInput" type="text" maxlength="200" required /></label>
             <label>Category <select id="calCategory"></select></label>
             <label>Date <input id="calDay" type="date" required /></label>
@@ -312,6 +313,16 @@
                 <option value="yearly">Every year</option>
               </select>
             </label>
+            <fieldset id="calWeekdays" class="cal-weekdays" hidden>
+              <legend>On these days</legend>
+              <label><input type="checkbox" data-weekday="1" /> Mon</label>
+              <label><input type="checkbox" data-weekday="2" /> Tue</label>
+              <label><input type="checkbox" data-weekday="3" /> Wed</label>
+              <label><input type="checkbox" data-weekday="4" /> Thu</label>
+              <label><input type="checkbox" data-weekday="5" /> Fri</label>
+              <label><input type="checkbox" data-weekday="6" /> Sat</label>
+              <label><input type="checkbox" data-weekday="7" /> Sun</label>
+            </fieldset>
             <label id="calUntilWrap" hidden>Until (optional) <input id="calUntil" type="date" /></label>
             <label>Notes <textarea id="calNotes" maxlength="2000" rows="2"></textarea></label>
             <p id="calFormError" class="cal-error" hidden></p>

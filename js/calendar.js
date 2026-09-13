@@ -167,7 +167,7 @@ let editing = null; // { id, seriesDay, scope: 'series' | 'occurrence' }
 function openEditor(occurrence) {
   const e = occurrence;
   const series = e ? SERIES.get(e.eventId) : null;
-  editing = e ? { id: e.eventId, seriesDay: e.seriesDay, scope: 'series' } : null;
+  editing = e ? { id: e.eventId, seriesDay: e.seriesDay, title: e.title, scope: 'series' } : null;
   $('calFormError').hidden = true;
   $('calId').value = e ? e.eventId : '';
   $('calTitleInput').value = e ? e.title : '';
@@ -178,7 +178,11 @@ function openEditor(occurrence) {
   $('calAllDay').checked = !e || !e.time;
   $('calTime').value = e && e.time ? e.time : '09:00';
   $('calMinutes').value = e && e.minutes ? e.minutes : 60;
-  $('calCategory').innerHTML = Object.values(CATS).filter((c) => c.active && !c.system)
+  // A retired category leaves the picker but keeps its events, so an edit that
+  // never touched the category needs an option to round-trip through.
+  const options = Object.values(CATS).filter((c) => c.active && !c.system);
+  if (e && CATS[e.categoryId] && !options.some((c) => c.id === e.categoryId)) options.push(CATS[e.categoryId]);
+  $('calCategory').innerHTML = options
     .map((c) => '<option value="' + esc(c.id) + '">' + esc(c.name) + '</option>').join('');
   if (e) $('calCategory').value = e.categoryId;
   $('calRepeat').value = series && series.repeat ? series.repeat.freq : '';
@@ -190,6 +194,10 @@ function openEditor(occurrence) {
   // An occurrence edit hides this below; every other open must show it again,
   // since nothing else resets it.
   $('calRepeat').closest('label').hidden = false;
+  // Only a stored weekly rule seeds these; anything else leaves them empty so
+  // the first switch to weekly picks up whatever date is in the form by then.
+  setWeekdays(series && series.repeat && series.repeat.freq === 'weekly' ? series.repeat.days : []);
+  showScope(e, 'series');
   syncFormBits();
   $('calEditor').hidden = false;
   $('calTitleInput').focus();
@@ -198,6 +206,26 @@ function openEditor(occurrence) {
 function syncFormBits() {
   $('calTimed').hidden = $('calAllDay').checked;
   $('calUntilWrap').hidden = !$('calRepeat').value;
+  const weekly = $('calRepeat').value === 'weekly';
+  $('calWeekdays').hidden = !weekly;
+  // Switching to weekly with nothing ticked would post a rule the validator
+  // refuses; the start weekday is the one day the rule must contain anyway.
+  if (weekly && !weekdaysFromForm().length) setWeekdays([weekday($('calDay').value)]);
+}
+
+const weekdayBoxes = () => [...$('calWeekdays').querySelectorAll('[data-weekday]')];
+const weekdaysFromForm = () => weekdayBoxes().filter((b) => b.checked).map((b) => +b.dataset.weekday);
+const setWeekdays = (days) => { for (const b of weekdayBoxes()) b.checked = days.includes(+b.dataset.weekday); };
+
+// Which of the two edits is open, said rather than inferred from whether the
+// Repeat control happens to be showing. A one-off has only one meaning.
+function showScope(occurrence, scope) {
+  const el = $('calScope');
+  el.hidden = !occurrence || !occurrence.repeating;
+  if (el.hidden) return;
+  el.textContent = scope === 'occurrence'
+    ? 'Editing this occurrence · ' + dayLabel(occurrence.day, denverToday())
+    : 'Editing the whole series';
 }
 
 function repeatFromForm(day, prev) {
@@ -206,6 +234,8 @@ function repeatFromForm(day, prev) {
   // An imported series can repeat on several weekdays; re-deriving from the
   // start day alone would silently drop the others.
   if (freq === 'weekly') {
+    const chosen = weekdaysFromForm();
+    if (chosen.length) return { freq, days: chosen };
     return prev && prev.freq === 'weekly' && prev.days.includes(weekday(day))
       ? { freq, days: prev.days }
       : { freq, days: [weekday(day)] };
@@ -244,6 +274,11 @@ async function submitEvent(ev) {
 
 async function deleteEvent() {
   if (!editing) return;
+  // Deleting a series takes every occurrence and every exception row with it,
+  // and there is no undo anywhere in this app.
+  const series = SERIES.get(editing.id);
+  if (editing.scope !== 'occurrence' && series && series.repeat &&
+      !window.confirm('Delete every occurrence of "' + editing.title + '"?')) return;
   const res = editing.scope === 'occurrence'
     ? await api('occurrenceSkip', { eventId: editing.id, day: editing.seriesDay })
     : await api('eventDelete', { id: editing.id });
@@ -295,6 +330,8 @@ $('calBody').addEventListener('click', async (ev) => {
   // Editing one occurrence cannot change the rule, so the rule controls go away.
   $('calRepeat').closest('label').hidden = scope === 'occurrence';
   $('calUntilWrap').hidden = scope === 'occurrence' || !$('calRepeat').value;
+  $('calWeekdays').hidden = scope === 'occurrence' || $('calRepeat').value !== 'weekly';
+  showScope(found, scope);
 });
 
 $('calAdd').addEventListener('click', () => openEditor(null));
@@ -303,6 +340,7 @@ $('calDelete').addEventListener('click', deleteEvent);
 $('calForm').addEventListener('submit', submitEvent);
 $('calAllDay').addEventListener('change', syncFormBits);
 $('calRepeat').addEventListener('change', syncFormBits);
+$('calDay').addEventListener('change', syncFormBits);
 
 $('calSync').addEventListener('click', async () => {
   $('calSync').disabled = true;
@@ -348,7 +386,14 @@ $('calCatList').addEventListener('click', async (ev) => {
   await renderCalendar(currentView(), currentArg());
 });
 
+// The picker keeps whatever was chosen last, which reads as the next category's
+// colour already being decided.
+const NEW_CAT_COLOR = $('calCatColor').value;
+
 $('calCatForm').addEventListener('submit', async (ev) => {
   ev.preventDefault();
-  if (await saveCat(null, $('calCatName').value, $('calCatColor').value)) $('calCatName').value = '';
+  if (await saveCat(null, $('calCatName').value, $('calCatColor').value)) {
+    $('calCatName').value = '';
+    $('calCatColor').value = NEW_CAT_COLOR;
+  }
 });
