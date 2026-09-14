@@ -1110,6 +1110,31 @@ input[type="search"]::-webkit-search-cancel-button {
   .seg a.seg-on { color: #fff; }
 }
 
+/* What is left this month: the remainder leads, its three parts follow. */
+.summary {
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--line-soft);
+}
+.summary-lead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.summary-label { font-weight: 600; }
+.summary-amt { font-size: 1.4rem; font-variant-numeric: tabular-nums; color: var(--ok); }
+.summary.over .summary-amt { color: var(--danger); }
+.summary-parts { margin-top: 8px; font-size: 0.9rem; }
+.summary-part {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .hist {
   padding: 12px 0;
   border-bottom: 1px solid var(--line-soft);

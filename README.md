@@ -139,6 +139,12 @@ the Budget screen reads. No function changes; push `main` and the Budget link
 appears in the nav. The Month view compares each spending category with its
 trailing average; the History view shows twelve months of bars per category.
 
+`0005_month_summary.sql` adds the block at the top of the Month view: the
+trailing average of the income categories, minus this month's filed spend
+(spend and wallet categories) and unfiled money out, leaving what is left for
+the month. Pending and removed transactions count in neither figure, and an
+unfiled deposit is ignored until it is filed. Push it the same way.
+
 ## Calendar (phase 4)
 
 1. **Migrate.** `npx supabase db push` applies `0004_calendar.sql`. Then
