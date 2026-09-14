@@ -1,9 +1,11 @@
-// Where the money goes. Month: each spending category against its trailing
-// average with a pace bar. History: twelve months of bars per category with
+// Where the money goes. Month: what is left once expected income meets the
+// spend so far, then each spending category against its trailing average with
+// a pace bar. History: twelve months of bars per category with
 // the average as a line. Both read views under RLS; nothing here writes.
 import { sb } from './api.js';
-import { $, esc, money } from './util.js';
+import { $, esc, money, denverToday } from './util.js';
 import { barChart } from './chart.js';
+import { summaryHtml } from './summary.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthLabel = (ym) => { const m = /^(\d{4})-(\d{2})/.exec(ym || ''); return m ? MONTHS[+m[2] - 1] : ''; };
@@ -14,11 +16,12 @@ export async function renderBudget(view) {
   const list = $('budgetList');
   const empty = $('budgetEmpty');
   const meta = $('budgetMeta');
+  const summary = $('budgetSummary');
   list.innerHTML = '<p class="muted">Loading…</p>';
-  empty.hidden = true; meta.hidden = true;
+  empty.hidden = true; meta.hidden = true; summary.hidden = true;
   try {
     if (view === 'history') await renderHistory(list, empty, meta);
-    else await renderMonth(list, empty, meta);
+    else await renderMonth(list, empty, meta, summary);
   } catch (err) {
     list.innerHTML = '';
     empty.hidden = false;
@@ -26,15 +29,22 @@ export async function renderBudget(view) {
   }
 }
 
-async function renderMonth(list, empty, meta) {
-  const { data, error } = await sb.from('category_pace').select('*');
-  if (error) throw new Error(error.message);
-  list.innerHTML = '';
-  if (!data.length) { empty.hidden = false; empty.textContent = 'No spending categories yet.'; return; }
-  const w = data[0];
+async function renderMonth(list, empty, meta, summary) {
+  const [pace, month] = await Promise.all([
+    sb.from('category_pace').select('*'),
+    sb.from('month_summary').select('*').single(),
+  ]);
+  if (pace.error) throw new Error(pace.error.message);
+  if (month.error) throw new Error(month.error.message);
+  const data = pace.data;
+  const w = month.data;
   meta.hidden = false;
   meta.textContent = 'Day ' + w.day_of_month + ' of ' + w.days_in_month +
     (w.months_in_window ? ' · average over the last ' + w.months_in_window + ' month' + (w.months_in_window === 1 ? '' : 's') : ' · no history yet');
+  summary.hidden = false;
+  summary.innerHTML = summaryHtml(w);
+  list.innerHTML = '';
+  if (!data.length) { empty.hidden = false; empty.textContent = 'No spending categories yet.'; return; }
   // Over-pace first, then by how far over, then by spend.
   data.sort((a, b) =>
     ((b.over_pace ? 1 : 0) - (a.over_pace ? 1 : 0)) ||
@@ -98,9 +108,8 @@ async function renderHistory(list, empty, meta) {
 // "YYYY-MM" for the last twelve calendar months, oldest first. Anchored on
 // Denver's date, not the browser's, so the keys line up with the month buckets
 // the views cut in Denver time.
-const denverDate = () => new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(new Date());
 function lastTwelveMonths() {
-  const [year, month] = denverDate().split('-').map(Number);
+  const [year, month] = denverToday().split('-').map(Number);
   const out = [];
   for (let back = 11; back >= 0; back--) {
     const n = month - 1 - back;

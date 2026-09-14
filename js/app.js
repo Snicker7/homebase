@@ -4,6 +4,7 @@ import { $, esc, money, banner } from './util.js';
 import { renderInbox, refreshInboxCount, wireInboxTabs } from './inbox.js';
 import { renderAccounts } from './bank.js';
 import { renderBudget } from './reports.js';
+import { renderCalendar } from './calendar.js';
 
 /* ── tiny helpers ───────────────────────────────────────────────────────── */
 // Mirrors the backend's slugify so the UI can detect duplicate category ids.
@@ -75,15 +76,16 @@ function setUpdating(on) {
 }
 
 function setView(name) {
-  ['loginView', 'checkinView', 'dashView', 'adminView', 'inboxView', 'accountsView', 'budgetView'].forEach((v) => ($(v).hidden = true));
-  $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView', inbox: 'inboxView', accounts: 'accountsView', budget: 'budgetView' }[name]).hidden = false;
+  ['loginView', 'checkinView', 'dashView', 'adminView', 'inboxView', 'accountsView', 'budgetView', 'calendarView'].forEach((v) => ($(v).hidden = true));
+  $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView', inbox: 'inboxView', accounts: 'accountsView', budget: 'budgetView', calendar: 'calendarView' }[name]).hidden = false;
   $('logoutBtn').hidden = !SIGNED_IN;
   $('navInbox').hidden = !SIGNED_IN;
   $('navAccounts').hidden = !SIGNED_IN;
   $('navBudget').hidden = !SIGNED_IN;
+  $('navCalendar').hidden = !SIGNED_IN;
 }
 
-// #/inbox, #/accounts and #/budget(/history) are screens; anything else is the dashboard.
+// #/inbox, #/accounts, #/budget(/history) and #/calendar(/month|/day) are screens; anything else is the dashboard.
 async function route() {
   if (!SIGNED_IN) { setView('login'); return; }
   const h = location.hash;
@@ -91,6 +93,9 @@ async function route() {
   if (h === '#/accounts') { setView('accounts'); await renderAccounts(); return; }
   if (h === '#/budget') { setView('budget'); await renderBudget('month'); return; }
   if (h === '#/budget/history') { setView('budget'); await renderBudget('history'); return; }
+  if (h === '#/calendar') { setView('calendar'); await renderCalendar('agenda'); return; }
+  if (h.startsWith('#/calendar/month')) { setView('calendar'); await renderCalendar('month', h.slice(17)); return; }
+  if (h.startsWith('#/calendar/day/')) { setView('calendar'); await renderCalendar('day', h.slice(15)); return; }
   await showDashboard();
 }
 

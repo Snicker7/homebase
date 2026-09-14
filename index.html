@@ -18,6 +18,7 @@
           <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
           <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
           <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
+          <a id="navCalendar" class="link-btn" href="#/calendar" hidden>Calendar</a>
           <button id="manageBtn" class="link-btn" hidden>Categories</button>
           <button id="logoutBtn" class="link-btn" hidden>Log out</button>
         </div>
@@ -269,8 +270,80 @@
           <a id="budgetTabHistory" class="ghost" href="#/budget/history">History</a>
         </div>
         <p id="budgetMeta" class="muted" hidden></p>
+        <div id="budgetSummary" hidden></div>
         <div id="budgetList"></div>
         <p id="budgetEmpty" class="muted" hidden></p>
+      </section>
+
+      <!-- CALENDAR: the family calendar — views, editor, and categories -->
+      <section id="calendarView" class="card" hidden>
+        <div class="row cal-head">
+          <div class="seg">
+            <button id="calTabAgenda" type="button" class="ghost">Agenda</button>
+            <button id="calTabMonth" type="button" class="ghost">Month</button>
+          </div>
+          <div class="row cal-nav">
+            <button id="calPrev" type="button" class="ghost" hidden>‹</button>
+            <span id="calTitle" class="cal-title"></span>
+            <button id="calNext" type="button" class="ghost" hidden>›</button>
+          </div>
+          <button id="calToday" type="button" class="ghost">Today</button>
+          <button id="calSync" type="button" class="ghost">Sync office</button>
+        </div>
+        <p id="calOfficeAge" class="muted cal-age" hidden></p>
+        <div id="calBody"></div>
+        <button id="calAdd" type="button" class="primary cal-add">＋ New event</button>
+        <div id="calEditor" class="cal-editor" hidden>
+          <form id="calForm">
+            <input type="hidden" id="calId" />
+            <p id="calScope" class="muted cal-scope" hidden></p>
+            <label>Title <input id="calTitleInput" type="text" maxlength="200" required /></label>
+            <label>Category <select id="calCategory"></select></label>
+            <label>Date <input id="calDay" type="date" required /></label>
+            <label class="cal-allday"><input id="calAllDay" type="checkbox" checked /> All day</label>
+            <div id="calTimed" class="row" hidden>
+              <label>Start <input id="calTime" type="time" /></label>
+              <label>Minutes <input id="calMinutes" type="number" min="1" max="1440" step="5" value="60" /></label>
+            </div>
+            <label>Repeats
+              <select id="calRepeat">
+                <option value="">Never</option>
+                <option value="daily">Every day</option>
+                <option value="weekly">Every week</option>
+                <option value="monthly">Every month</option>
+                <option value="yearly">Every year</option>
+              </select>
+            </label>
+            <fieldset id="calWeekdays" class="cal-weekdays" hidden>
+              <legend>On these days</legend>
+              <label><input type="checkbox" data-weekday="1" /> Mon</label>
+              <label><input type="checkbox" data-weekday="2" /> Tue</label>
+              <label><input type="checkbox" data-weekday="3" /> Wed</label>
+              <label><input type="checkbox" data-weekday="4" /> Thu</label>
+              <label><input type="checkbox" data-weekday="5" /> Fri</label>
+              <label><input type="checkbox" data-weekday="6" /> Sat</label>
+              <label><input type="checkbox" data-weekday="7" /> Sun</label>
+            </fieldset>
+            <label id="calUntilWrap" hidden>Until (optional) <input id="calUntil" type="date" /></label>
+            <label>Notes <textarea id="calNotes" maxlength="2000" rows="2"></textarea></label>
+            <p id="calFormError" class="cal-error" hidden></p>
+            <div class="row">
+              <button type="submit" class="primary">Save</button>
+              <button type="button" id="calDelete" class="ghost" hidden>Delete</button>
+              <button type="button" id="calCancel" class="ghost">Cancel</button>
+            </div>
+          </form>
+        </div>
+        <details id="calCats" class="cal-cats">
+          <summary>Categories</summary>
+          <div id="calCatList"></div>
+          <form id="calCatForm" class="row">
+            <input id="calCatName" type="text" placeholder="New category" maxlength="40" required />
+            <input id="calCatColor" type="color" value="#57c785" />
+            <button type="submit" class="ghost">Add</button>
+          </form>
+          <p id="calCatError" class="cal-error" hidden></p>
+        </details>
       </section>
 
       <footer class="foot muted">Build the habit, bank the reward 🌱</footer>

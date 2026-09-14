@@ -1110,6 +1110,31 @@ input[type="search"]::-webkit-search-cancel-button {
   .seg a.seg-on { color: #fff; }
 }
 
+/* What is left this month: the remainder leads, its three parts follow. */
+.summary {
+  margin: 4px 0 8px;
+  padding: 12px 14px;
+  border-radius: 12px;
+  background: var(--line-soft);
+}
+.summary-lead {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 12px;
+}
+.summary-label { font-weight: 600; }
+.summary-amt { font-size: 1.4rem; font-variant-numeric: tabular-nums; color: var(--ok); }
+.summary.over .summary-amt { color: var(--danger); }
+.summary-parts { margin-top: 8px; font-size: 0.9rem; }
+.summary-part {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 2px 0;
+  font-variant-numeric: tabular-nums;
+}
+
 .hist {
   padding: 12px 0;
   border-bottom: 1px solid var(--line-soft);
@@ -1123,3 +1148,58 @@ input[type="search"]::-webkit-search-cancel-button {
 .chart .bar { fill: currentColor; opacity: 0.85; }
 .chart .avg { stroke: var(--gold); stroke-width: 1.5; stroke-dasharray: 4 3; }
 .chart .lbl { fill: var(--muted); font-size: 9px; }
+
+/* ── calendar ─────────────────────────────────────────────────────────────── */
+.cal-head { justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.cal-nav { align-items: center; gap: 4px; }
+.cal-title { font-weight: 600; }
+.cal-age { margin: 4px 0 12px; font-size: 0.85rem; }
+.cal-error { color: var(--danger); }
+
+.cal-grid-head { display: grid; grid-template-columns: repeat(7, 1fr); text-align: center; color: var(--muted); font-size: 0.75rem; }
+.cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+.cal-cell { display: flex; flex-direction: column; gap: 3px; min-height: 60px; padding: 4px; border-radius: 8px;
+  background: var(--field); color: var(--ink); text-decoration: none; }
+.cal-cell.outside { opacity: 0.42; }
+.cal-cell.today { outline: 2px solid var(--accent); }
+.cal-dom { font-size: 0.8rem; }
+.cal-bars { display: flex; flex-direction: column; gap: 2px; }
+.cal-bar { height: 4px; border-radius: 2px; background: var(--cat); }
+.cal-bar.waiting { opacity: 0.45; }
+.cal-bar.done { opacity: 0.3; }
+.cal-more { font-size: 0.7rem; color: var(--muted); }
+
+.agenda-day h3 { margin: 18px 0 6px; font-size: 0.95rem; color: var(--muted); }
+.cal-item { display: flex; gap: 10px; align-items: baseline; width: 100%; padding: 8px 10px; margin-bottom: 4px;
+  border-left: 4px solid var(--cat); border-radius: 8px; color: var(--ink); text-decoration: none;
+  background: color-mix(in oklab, var(--cat) 18%, var(--card)); }
+.cal-item.waiting { opacity: 0.55; }
+.cal-item.done .cal-title-text { text-decoration: line-through; }
+.cal-when { flex: 0 0 auto; color: var(--muted); font-size: 0.85rem; min-width: 7.5em; }
+.cal-what { display: flex; flex-direction: column; }
+.cal-business { font-size: 0.75rem; color: var(--muted); }
+@media (max-width: 420px) {
+  .cal-item { flex-direction: column; gap: 2px; }
+  .cal-when { min-width: 0; }
+}
+
+.cal-add { margin-top: 16px; }
+.cal-editor { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--field); }
+.cal-editor label { display: block; margin-bottom: 10px; }
+.cal-editor input[type="text"], .cal-editor input[type="date"], .cal-editor input[type="time"],
+.cal-editor input[type="number"], .cal-editor select, .cal-editor textarea { width: 100%; }
+.cal-editor .cal-allday { display: flex; align-items: center; gap: 8px; }
+.cal-editor .cal-allday input { width: auto; }
+.cal-scope { margin: 0 0 10px; font-size: 0.85rem; }
+.cal-weekdays { display: flex; flex-wrap: wrap; gap: 4px 12px; margin: 0 0 10px; padding: 8px 10px;
+  border: 1px solid var(--line); border-radius: 8px; }
+.cal-weekdays legend { padding: 0 4px; color: var(--muted); font-size: 0.8rem; }
+.cal-editor .cal-weekdays label { display: flex; align-items: center; gap: 4px; margin: 0; font-size: 0.85rem; }
+.cal-weekdays input { width: auto; }
+
+.cal-cats { margin-top: 20px; }
+.cal-cats summary { cursor: pointer; color: var(--muted); }
+.cal-cat { display: flex; align-items: center; gap: 8px; margin: 8px 0; }
+.cal-cat input[type="color"] { width: 36px; height: 28px; padding: 0; border: none; background: none; }
+.cal-cat input[type="text"] { flex: 1; }
+.cal-cat-tag { font-size: 0.75rem; }
