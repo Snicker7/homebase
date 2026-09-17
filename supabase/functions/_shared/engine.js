@@ -237,13 +237,17 @@ function nextChorePeriodKey(cadence, key) {
 }
 
 var CHORE_DUE_DAYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+var CHORE_CADENCES = ['daily', 'weekly', 'biweekly', 'monthly', 'once', 'anytime'];
 
 /**
  * Last day `periodKey` can still be done penalty-free. Weekly chores may pick
  * a due day inside the week (blank = Sunday); monthly chores run to month end;
- * a once-chore's is its optional dueDate.
+ * a once-chore's is its optional dueDate. An anytime chore has none at all.
  */
 function choreDueDateFor(cat, periodKey) {
+  // No due date is what makes an anytime chore what it is: nothing ever
+  // closes, so the sweep never drains it and there is no pot to catch up.
+  if (cat.cadence === 'anytime') return '';
   if (cat.cadence === 'weekly' || cat.cadence === 'biweekly') {
     var offset = CHORE_DUE_DAYS.indexOf(cat.dueDay);
     // A fortnight's due day falls in its second week.
@@ -321,9 +325,11 @@ function choreDrainCount(rows, categoryId, periodKey) {
 /**
  * Where a chore sits on the dashboard: 'today' (due now or carrying an
  * accruing pot), 'week' (weekly, due later this week), 'month' (do-whenever:
- * monthly, and once-chores whose due date hasn't arrived).
+ * monthly, and once-chores whose due date hasn't arrived), 'anytime' (a
+ * standing bounty with no deadline).
  */
 function choreGroup(cat, todayStr, hasOutstanding) {
+  if (cat.cadence === 'anytime') return 'anytime';
   if (hasOutstanding) return 'today';
   if (cat.cadence === 'daily') return 'today';
   if (cat.cadence === 'weekly' || cat.cadence === 'biweekly') {
@@ -752,8 +758,7 @@ function isWholeHour(t) {
 function normalizeCategory(raw) {
   raw = raw || {};
   if (raw.kind === 'chore') {
-    var cadence = raw.cadence === 'weekly' || raw.cadence === 'biweekly' || raw.cadence === 'monthly' || raw.cadence === 'once'
-      ? raw.cadence : (raw.cadence === 'daily' ? 'daily' : String(raw.cadence || ''));
+    var cadence = CHORE_CADENCES.indexOf(raw.cadence) === -1 ? String(raw.cadence || '') : raw.cadence;
     return {
       id: raw.id ? slugify(raw.id) : slugify(raw.name),
       name: String(raw.name || '').trim(),
@@ -802,8 +807,8 @@ function validateCategory(cat) {
   if (!cat.id) errs.push('A name is required (used to build the id).');
   if (!cat.name) errs.push('Name is required.');
   if (cat.kind === 'chore') {
-    if (['daily', 'weekly', 'biweekly', 'monthly', 'once'].indexOf(cat.cadence) === -1) {
-      errs.push('Chore cadence must be daily, weekly, biweekly, monthly, or once.');
+    if (CHORE_CADENCES.indexOf(cat.cadence) === -1) {
+      errs.push('Chore cadence must be daily, weekly, biweekly, monthly, once, or anytime.');
     }
     if (!(cat.value > 0)) errs.push('Chore value must be a positive number.');
     if (cat.assignee && !/^[^@\s]+@[^@\s]+$/.test(cat.assignee)) errs.push('Assignee must be an email address, or blank for either of you.');

@@ -307,6 +307,7 @@ const CHORE_GROUPS = [
   { key: 'today', title: '☀️ Today', open: true },
   { key: 'week', title: '📅 Coming up', open: false },
   { key: 'month', title: '🗓️ Any day this month', open: false },
+  { key: 'anytime', title: '♾️ Anytime', open: false },
   { key: 'once', title: '📌 One-time', open: false },
 ];
 
@@ -316,7 +317,7 @@ function renderChoreCards(chores, pauseUntil, me) {
   if (chores.length || pauseUntil) renderChorePause(wrap, pauseUntil);
   // Every group collapses. Today opens by default since it wants action;
   // the rest open only if this phone left them open last time.
-  const groups = { today: [], week: [], month: [], once: [] };
+  const groups = { today: [], week: [], month: [], anytime: [], once: [] };
   chores.forEach((c) => {
     const key = c.cadence === 'once' ? 'once' : (groups[c.group] ? c.group : 'today');
     groups[key].push(c);
@@ -345,7 +346,10 @@ function choreCard(c, me) {
   // rather than throwing and blanking every card on the page.
   const outstanding = Array.isArray(c.outstanding) ? c.outstanding : [];
   const who = c.assignee ? esc(c.assigneeName) : 'Shared';
-  const cadence = { daily: 'Daily', weekly: 'Weekly', biweekly: 'Every two weeks', monthly: 'Monthly', once: 'One-time' }[c.cadence] || c.cadence;
+  const cadence = { daily: 'Daily', weekly: 'Weekly', biweekly: 'Every two weeks', monthly: 'Monthly', once: 'One-time', anytime: 'Anytime' }[c.cadence] || c.cadence;
+  // An anytime chore is never finished, so it keeps its button and tallies the
+  // day instead of showing who closed it out.
+  const doneToday = Number(c.doneToday) || 0;
   const card = document.createElement('div');
   card.className = 'card';
   card.innerHTML =
@@ -361,9 +365,10 @@ function choreCard(c, me) {
         ? '<div class="actions" style="margin-top:8px"><button class="ok" data-claim>✋ I did it</button>' +
           (c.assignee ? '' : '<button class="ok-ghost" data-claim-together>🤝 We did it</button>') + '</div>'
         : '') +
+    (doneToday ? '<p class="chore-done">✓ done ' + doneToday + '× today</p>' : '') +
     '<p class="muted">' + cadence +
     ((c.cadence === 'weekly' || c.cadence === 'biweekly') && c.dueDay ? ' • due ' + (DUE_DAY_NAMES[c.dueDay] || esc(c.dueDay)) : '') +
-    (c.cadence === 'once' ? '' : ' • ' + esc(chorePeriodLabel(c))) + '</p>' +
+    (c.cadence === 'once' || c.cadence === 'anytime' ? '' : ' • ' + esc(chorePeriodLabel(c))) + '</p>' +
     (c.notes
       ? '<details class="notes"><summary>📝 Notes</summary><p class="notes-text">' + esc(c.notes) + '</p></details>'
       : '') +
@@ -739,7 +744,7 @@ function renderCatList(cats) {
   const pick = $('catPick');
   const current = pick.value;
   const label = (c) => (c.emoji ? c.emoji + ' ' : '') + c.name + ' · ' +
-    ({ biweekly: 'every 2 weeks', once: 'one-time' }[c.cadence] || c.cadence);
+    ({ biweekly: 'every 2 weeks', once: 'one-time', anytime: 'anytime' }[c.cadence] || c.cadence);
   const options = (list) => list.map((c) =>
     '<option value="' + esc(c.id) + '">' + esc(label(c)) + '</option>').join('');
   const active = cats.filter((c) => c.active);
@@ -804,7 +809,7 @@ function applyKindToForm(kind) {
   document.querySelectorAll('#catCadence option.chore-cadence').forEach((o) => { o.hidden = !chore; });
   // Chores are covered by the morning digest, not a per-chore reminder hour.
   $('reminderField').hidden = chore;
-  if (!chore && ['biweekly', 'monthly', 'once'].includes($('catCadence').value)) {
+  if (!chore && ['biweekly', 'monthly', 'once', 'anytime'].includes($('catCadence').value)) {
     $('catCadence').value = 'daily';
   }
   document.querySelectorAll('#habitFields input').forEach((i) => { i.required = !chore && i.dataset.req === '1'; });
