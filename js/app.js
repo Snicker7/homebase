@@ -1,6 +1,6 @@
 // ES module: the browser loads this with <script type="module">.
 import { api, checkup, requestLogin, getSession, signOut, onAuthChange, configured } from './api.js';
-import { $, esc, money, banner } from './util.js';
+import { $, esc, money, banner, storageWritable } from './util.js';
 import { renderInbox, refreshInboxCount, wireInboxTabs } from './inbox.js';
 import { renderAccounts } from './bank.js';
 import { renderBudget } from './reports.js';
@@ -78,6 +78,7 @@ function setUpdating(on) {
 function setView(name) {
   ['loginView', 'checkinView', 'dashView', 'adminView', 'inboxView', 'accountsView', 'budgetView', 'calendarView'].forEach((v) => ($(v).hidden = true));
   $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView', inbox: 'inboxView', accounts: 'accountsView', budget: 'budgetView', calendar: 'calendarView' }[name]).hidden = false;
+  $('navMenu').hidden = !SIGNED_IN;
   $('logoutBtn').hidden = !SIGNED_IN;
   $('navInbox').hidden = !SIGNED_IN;
   $('navAccounts').hidden = !SIGNED_IN;
@@ -887,15 +888,23 @@ function wire() {
     else setView('login');
   });
 
+  // A <details> stays open after a link inside it is followed, and the next
+  // screen would render behind an open panel.
+  $('navMenu').addEventListener('click', (e) => {
+    if (e.target.closest('.menu-items')) $('navMenu').open = false;
+  });
+  // Every screen leaves through this one link now. The admin screen is not a
+  // route — it is reached by a button while the hash still reads '#/' — and
+  // assigning the hash it already holds fires no hashchange, so Dashboard has
+  // to route itself rather than wait for an event that will not come.
+  $('navDash').addEventListener('click', (e) => {
+    if (location.hash && location.hash !== '#/') return;
+    e.preventDefault();
+    showDashboard();
+  });
+
   $('manageBtn').addEventListener('click', showAdmin);
   wireCatPick();
-  $('backToDashBtn').addEventListener('click', () => {
-    // Assigning a hash equal to the current one fires no hashchange, so
-    // after a visit to Inbox/Accounts the hash already sits at '#/' —
-    // route directly in that case instead of waiting on an event that won't fire.
-    if (location.hash && location.hash !== '#/') location.hash = '#/';
-    else showDashboard();
-  });
   $('cancelEditBtn').addEventListener('click', resetCatForm);
 
   // Remember which habit inputs are required today so applyKindToForm can
@@ -955,6 +964,12 @@ async function boot() {
   wire();
   if (!configured()) {
     banner('⚠️ Backend not set up yet — add SUPABASE_URL and SUPABASE_ANON_KEY to js/config.js.', true);
+  // A browser that won't keep site storage sends supabase-js to an in-memory
+  // session that dies with the tab, so every new tab asks for a login again.
+  // Nothing here can fix it, but leaving it unexplained is worse. The warning
+  // rides on the login screen, which is where a blocked browser always lands.
+  } else if (!storageWritable(globalThis.localStorage)) {
+    banner('This browser is blocking site storage, so you\'ll be signed out when the tab closes. In Safari: leave Private Browsing, or turn off Settings → Safari → Block All Cookies.', true);
   }
   const qp = new URLSearchParams(location.search);
   const t = qp.get('t');

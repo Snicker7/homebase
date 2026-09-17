@@ -1,9 +1,9 @@
 /**
- * Sleep Streak — reward engine (pure functions).
+ * Homebase — reward engine (pure functions).
  *
- * No Apps Script or Node globals are used here, so this file is shared by:
- *   - the Node test suite (engine.test.js), and
- *   - the Apps Script backend (Code.gs includes this logic).
+ * Nothing here touches a runtime global, so one copy serves both:
+ *   - the Deno edge functions, and
+ *   - the Node test suite (engine.test.js).
  *
  * All rules live here so there is exactly one source of truth.
  */
@@ -351,7 +351,10 @@ function chorePayout(cat, pot) {
   return cat.assignee ? round2(cat.value) : round2(cat.value + pot);
 }
 
-/** Sheet cells round-trip booleans as true/'TRUE'/'true' depending on path. */
+/**
+ * freezeUsed reads as a real boolean from Postgres, but rows the Sheet
+ * migration carried over hold the string form. Both have to mean the same.
+ */
 function isTrueFlag(v) {
   return v === true || String(v).toLowerCase() === 'true';
 }
@@ -537,13 +540,18 @@ function applyEntry(state, balance, cat, input) {
 function applyRefresh(state, balance, cat, newPeriodStart, hadEntries) {
   var s = Object.assign({}, state);
   var event = null;
-  if (cat.unusedFreezeBonus > 0 && hadEntries && !(Number(state.freezesUsedThisPeriod) || 0)) {
-    balance = round2(balance + cat.unusedFreezeBonus);
+  // Every freeze you didn't need pays, not just a period you swept clean: the
+  // configured amount is a per-freeze rate. A category granting no freezes has
+  // none to leave unused, so it pays nothing however clean the period was.
+  var unused = freezesLeft(cat, state);
+  if (cat.unusedFreezeBonus > 0 && hadEntries && unused > 0) {
+    var bonus = round2(unused * cat.unusedFreezeBonus);
+    balance = round2(balance + bonus);
     event = {
       type: 'bonus',
       category: cat.id,
-      amount: cat.unusedFreezeBonus,
-      note: 'Unused freeze bonus',
+      amount: bonus,
+      note: unused + ' unused freeze' + (unused === 1 ? '' : 's'),
       actor: 'system',
       balanceAfter: balance,
     };
@@ -737,7 +745,7 @@ function escapeHtml(v) {
   });
 }
 
-// Task 4 helpers (not exported)
+// Category-shape helpers (not exported)
 function slugify(s) {
   return String(s || '')
     .toLowerCase()

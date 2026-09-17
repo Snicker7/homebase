@@ -1132,3 +1132,35 @@ test('anytime: normalize keeps the cadence, validate rejects a deadline on it', 
   assert.ok(E.validateCategory(Object.assign({}, ANYTIME, { dueDate: '2026-09-30' })).some((e) => /due date/i.test(e)));
   assert.ok(E.validateCategory(Object.assign({}, ANYTIME, { dueDay: 'wed' })).some((e) => /due day/i.test(e)));
 });
+
+// Every freeze you didn't need pays, not just a clean sweep
+
+test('refresh pays the bonus once per unused freeze', () => {
+  const two = Object.assign({}, CAT, { freezesPerPeriod: 2 });
+  const clean = E.applyRefresh({ streak: 3, periodStart: 'P1', freezesUsedThisPeriod: 0, lastRecordedKey: 'k' }, 10, two, 'P2', true);
+  assert.strictEqual(clean.balance, 17);
+  assert.strictEqual(clean.event.amount, 7);
+  assert.match(clean.event.note, /2 unused freezes/);
+});
+
+test('refresh still pays for the freezes left when one was spent', () => {
+  const two = Object.assign({}, CAT, { freezesPerPeriod: 2 });
+  const r = E.applyRefresh({ streak: 3, periodStart: 'P1', freezesUsedThisPeriod: 1, lastRecordedKey: 'k' }, 10, two, 'P2', true);
+  assert.strictEqual(r.balance, 13.5);
+  assert.strictEqual(r.event.amount, 3.5);
+  assert.match(r.event.note, /1 unused freeze\b/);
+});
+
+test('refresh pays nothing once every freeze is spent', () => {
+  const two = Object.assign({}, CAT, { freezesPerPeriod: 2 });
+  const r = E.applyRefresh({ streak: 3, periodStart: 'P1', freezesUsedThisPeriod: 2, lastRecordedKey: 'k' }, 10, two, 'P2', true);
+  assert.strictEqual(r.balance, 10);
+  assert.strictEqual(r.event, null);
+});
+
+test('refresh pays nothing on a category that grants no freezes at all', () => {
+  const none = Object.assign({}, CAT, { freezesPerPeriod: 0 });
+  const r = E.applyRefresh({ streak: 3, periodStart: 'P1', freezesUsedThisPeriod: 0, lastRecordedKey: 'k' }, 10, none, 'P2', true);
+  assert.strictEqual(r.balance, 10, 'no freezes means none went unused');
+  assert.strictEqual(r.event, null);
+});

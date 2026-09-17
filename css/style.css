@@ -47,21 +47,69 @@ body {
   justify-content: space-between;
   margin-bottom: 8px;
 }
-.who {
+/* Every screen is one tap away, from every screen. A <details> rather than a
+   scripted dropdown, like every other disclosure in this app. */
+.menu {
+  position: relative;
+}
+.menu-btn {
+  position: relative;
+  cursor: pointer;
+  list-style: none;
+  padding: 6px 10px;
+  border-radius: 10px;
+  font-size: 1.3rem;
+  line-height: 1;
+  color: var(--accent);
+}
+.menu-btn::-webkit-details-marker {
+  display: none;
+}
+.menu[open] .menu-btn {
+  background: var(--line-soft);
+}
+/* The unread count still has to reach someone whose menu is shut. */
+.menu-btn .dot {
+  position: absolute;
+  top: 2px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+}
+.menu-items {
+  position: absolute;
+  top: calc(100% + 6px);
+  right: 0;
+  z-index: 20;
   display: flex;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  align-items: center;
-  gap: 0 2px;
+  flex-direction: column;
+  align-items: stretch;
+  min-width: 190px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--card);
+  box-shadow: var(--shadow);
+}
+.menu-items .link-btn {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  font-size: 0.95rem;
+}
+.menu-items .link-btn:hover {
+  background: var(--line-soft);
+}
+.menu-who {
+  padding: 6px 12px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  margin-bottom: 4px;
   font-size: 0.85rem;
 }
-.who > #whoami {
-  flex-basis: 100%;
-  text-align: right;
-}
-.who .link-btn {
-  font-size: 0.85rem;
-  padding: 6px 6px;
+.menu-who:empty {
+  display: none;
 }
 .topbar h1 {
   white-space: nowrap;

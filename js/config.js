@@ -1,6 +1,7 @@
 // Supabase project the dashboard talks to. Both values are public by design:
 // the anon key only grants what row-level security and the edge functions allow.
-// These are the local CLI defaults; production values land in Task 13.
+// Committed pointing at production. While developing, swap in the local CLI
+// values from `npx supabase status` — and leave that edit out of your commits.
 window.CONFIG = {
   SUPABASE_URL: 'https://csimcqtbezylvbbzgqyg.supabase.co',
   SUPABASE_ANON_KEY:
