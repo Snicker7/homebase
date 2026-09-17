@@ -406,6 +406,12 @@ export function createService(ctx) {
       });
     });
     const claimant = claimants.length ? claimants.map(store.displayName).join(' & ') : null;
+    // An anytime chore is never finished, so it reports how many times it was
+    // done today rather than who closed it out. The card keeps its button.
+    const anytime = c.cadence === 'anytime';
+    const doneToday = anytime ? rows.filter(function (r0) {
+      return r0.type === 'claim' && String(r0.category) === c.id && String(r0.periodKey) === current;
+    }).length : 0;
     // Only the latest closed period is still catchable — lost ones drop off
     // the card rather than sitting there as an uncollectable pot.
     const catchable = catchablePeriod(c, st, todayStr());
@@ -417,7 +423,7 @@ export function createService(ctx) {
       value: c.value, assignee: c.assignee, assigneeName: c.assignee ? store.displayName(c.assignee) : '',
       dueDate: c.dueDate || '', dueDay: c.dueDay || '', notes: c.notes || '',
       claimablePeriodKey: current,
-      claimedBy: claimant, outstanding: outstanding,
+      claimedBy: anytime ? null : claimant, doneToday: doneToday, outstanding: outstanding,
       group: E.choreGroup(c, todayStr(), outstanding.length > 0),
     };
   }
@@ -750,6 +756,10 @@ export function createService(ctx) {
       return { ok: false, error: 'that isn\'t a valid period for this chore' };
     }
     if (periodKey > current) return { ok: false, error: 'that period hasn\'t started yet' };
+    // Nothing ever closes on an anytime chore, so there is no past to collect.
+    if (cat.cadence === 'anytime' && periodKey !== current) {
+      return { ok: false, error: 'this chore has no deadline — there is nothing to catch up' };
+    }
     if (cat.cadence !== 'once' && periodKey < s.since) {
       return { ok: false, error: 'this chore only started being tracked in ' + s.since };
     }
@@ -764,7 +774,9 @@ export function createService(ctx) {
         return { ok: false, error: periodKey + ' is gone — it came due again before anyone did it' };
       }
     }
-    if (E.isChoreClaimed(getRows(), cat.id, periodKey)) {
+    // One claim per period is what a period MEANS; an anytime chore has none,
+    // so it can be claimed as often as it is actually done.
+    if (cat.cadence !== 'anytime' && E.isChoreClaimed(getRows(), cat.id, periodKey)) {
       return { ok: false, error: 'already done — ' + periodKey + ' is claimed' };
     }
     const pot = E.chorePotFor(getRows(), cat.id, periodKey);

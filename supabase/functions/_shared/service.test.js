@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert';
 import { createService } from './service.js';
-import { makeCtx, ANN, BO, BEDTIME, DISHES } from './testkit.js';
+import { makeCtx, ANN, BO, BEDTIME, DISHES, MEALPREP } from './testkit.js';
 import { verifyToken } from './token.js';
 
 test('state: fresh store initializes states and returns dashboard shape', () => {
@@ -515,4 +515,66 @@ test('state: within a day the habit entry comes before the card row', () => {
   // Newest first, so the card row leads and the entry follows.
   assert.deepStrictEqual(r.ledger.map((e) => e.type), ['card', 'entry']);
   assert.deepStrictEqual(r.ledger.map((e) => e.balanceAfter), [1, 2]);
+});
+
+/* ── anytime chores ────────────────────────────────────────────────────── */
+
+test('claim: an anytime chore pays full value every time it is done', () => {
+  const { ctx, store } = makeCtx({ categories: [MEALPREP] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN });
+  assert.strictEqual(svc.route({ action: 'claim', user: ANN, categoryId: 'mealprep' }).wallet, 2);
+  assert.strictEqual(svc.route({ action: 'claim', user: ANN, categoryId: 'mealprep' }).wallet, 4);
+  assert.strictEqual(svc.route({ action: 'claim', user: BO, categoryId: 'mealprep' }).wallet, 2);
+  const claims = store.readLedgerRows().filter((r) => r.type === 'claim');
+  assert.strictEqual(claims.length, 3);
+  assert.ok(claims.every((r) => r.periodKey === '2026-09-08'), 'each claim is stamped with the day it happened');
+});
+
+test('claim: an anytime chore has no past period to catch up', () => {
+  const { ctx } = makeCtx({ categories: [MEALPREP] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN });
+  assert.match(svc.route({ action: 'claim', user: ANN, categoryId: 'mealprep', periodKey: '2026-09-07' }).error,
+    /no deadline/i);
+});
+
+test('state: an anytime chore never drains, and counts today instead of saying done', () => {
+  const { ctx, store } = makeCtx({
+    categories: [MEALPREP],
+    choreStates: [{ category: 'mealprep', state: { since: '2026-09-01', sweepFrom: '2026-09-01', chargedThrough: '2026-09-01' } }],
+  });
+  const svc = createService(ctx);
+  const before = svc.route({ action: 'state', user: ANN }).chores[0];
+  assert.strictEqual(before.group, 'anytime');
+  assert.strictEqual(before.doneToday, 0);
+  assert.strictEqual(store.readLedgerRows().filter((r) => r.type === 'penalty').length, 0,
+    'a week of neglect costs nothing — there was never a deadline');
+  svc.route({ action: 'claim', user: ANN, categoryId: 'mealprep' });
+  const after = svc.route({ action: 'state', user: ANN }).chores[0];
+  assert.strictEqual(after.doneToday, 1);
+  assert.strictEqual(after.claimedBy, null, 'the card keeps its button — it is never finished');
+  assert.deepStrictEqual(after.outstanding, []);
+});
+
+test('digest: an anytime chore is never due, so it stays out of the morning email', async () => {
+  const { ctx, sent } = makeCtx({ nowIso: DIGEST_HOUR, categories: [MEALPREP] });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 0);
+});
+
+test('saveCategory: switching a daily chore to anytime drops its deadline and its floor', () => {
+  const { ctx, store } = makeCtx({ categories: [DISHES] });
+  const svc = createService(ctx);
+  svc.route({ action: 'state', user: ANN });
+  const r = svc.route({ action: 'saveCategory', user: ANN, category: { ...DISHES, cadence: 'anytime' } });
+  assert.strictEqual(r.ok, true, r.error);
+  assert.strictEqual(svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' }).wallet, 2);
+  assert.strictEqual(svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' }).wallet, 4);
+  // A week later it still owes nothing and is still claimable.
+  ctx.setNow('2026-09-15T16:00:00Z');
+  const view = svc.route({ action: 'state', user: ANN }).chores[0];
+  assert.strictEqual(store.readLedgerRows().filter((x) => x.type === 'penalty').length, 0);
+  assert.strictEqual(view.group, 'anytime');
+  assert.strictEqual(view.doneToday, 0);
 });

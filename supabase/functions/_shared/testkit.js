@@ -17,6 +17,12 @@ export const DISHES = {
   value: 2, assignee: '', dueDate: '', dueDay: '', notes: '', reminderTime: '20:00', active: true,
 };
 
+// A standing bounty: no deadline, claimable as often as you like.
+export const MEALPREP = {
+  id: 'mealprep', kind: 'chore', name: 'Meal prep', emoji: '🥘', cadence: 'anytime',
+  value: 2, assignee: '', dueDate: '', dueDay: '', notes: '', reminderTime: '', active: true,
+};
+
 export function makeCtx(opts = {}) {
   const store = createStore({
     people: opts.people || [{ email: ANN, name: 'Ann' }, { email: BO, name: 'Bo' }],

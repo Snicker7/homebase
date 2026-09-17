@@ -1100,3 +1100,35 @@ test('biweekly: normalize keeps the cadence and validate accepts a due day', () 
   assert.strictEqual(cat.cadence, 'biweekly');
   assert.deepStrictEqual(E.validateCategory(cat), []);
 });
+
+// Anytime chores: a standing bounty with no period to miss
+
+const ANYTIME = { id: 'mealprep', name: 'Meal prep', emoji: '', notes: '', kind: 'chore', cadence: 'anytime', value: 2, assignee: '', dueDate: '', dueDay: '', reminderTime: '', active: true };
+
+test('anytime: keys are dates, so a claim is stamped with the day it happened', () => {
+  assert.strictEqual(E.periodKeyFor('anytime', '2026-09-16'), '2026-09-16');
+  assert.strictEqual(E.claimablePeriodKey(ANYTIME, '2026-09-16'), '2026-09-16');
+  assert.strictEqual(E.validPeriodKey('anytime', '2026-09-16'), true);
+  assert.strictEqual(E.validPeriodKey('anytime', '2026-09-31'), false);
+  assert.strictEqual(E.choreKeyFitsCadence('anytime', '2026-09-16'), true);
+  assert.strictEqual(E.choreKeyFitsCadence('anytime', '2026-09'), false);
+});
+
+test('anytime: nothing is ever due, so no period ever closes', () => {
+  assert.strictEqual(E.choreDueDateFor(ANYTIME, '2026-09-16'), '');
+  assert.strictEqual(E.chorePeriodClosed(ANYTIME, '2026-09-16', '2027-01-01'), false);
+  assert.strictEqual(E.latestClosedPeriod(ANYTIME, '2026-09-16', '2027-01-01'), null);
+  assert.strictEqual(E.resumeSweepFrom(ANYTIME, '2026-09-16', '2027-01-01'), '2026-09-16');
+});
+
+test('anytime: sits in its own group, never in today', () => {
+  assert.strictEqual(E.choreGroup(ANYTIME, '2026-09-16', false), 'anytime');
+});
+
+test('anytime: normalize keeps the cadence, validate rejects a deadline on it', () => {
+  const cat = E.normalizeCategory({ kind: 'chore', name: 'Meal prep', cadence: 'anytime', value: '2' });
+  assert.strictEqual(cat.cadence, 'anytime');
+  assert.deepStrictEqual(E.validateCategory(cat), []);
+  assert.ok(E.validateCategory(Object.assign({}, ANYTIME, { dueDate: '2026-09-30' })).some((e) => /due date/i.test(e)));
+  assert.ok(E.validateCategory(Object.assign({}, ANYTIME, { dueDay: 'wed' })).some((e) => /due day/i.test(e)));
+});
