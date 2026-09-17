@@ -13,15 +13,19 @@
     <main class="wrap">
       <header class="topbar">
         <h1>🌱 Habit Builder</h1>
-        <div class="who">
-          <span id="whoami" class="muted"></span>
-          <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
-          <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
-          <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
-          <a id="navCalendar" class="link-btn" href="#/calendar" hidden>Calendar</a>
-          <button id="manageBtn" class="link-btn" hidden>Categories</button>
-          <button id="logoutBtn" class="link-btn" hidden>Log out</button>
-        </div>
+        <details id="navMenu" class="menu">
+          <summary class="menu-btn" aria-label="Menu" title="Menu">☰<span id="navDot" class="dot" hidden></span></summary>
+          <nav class="menu-items">
+            <span id="whoami" class="muted menu-who"></span>
+            <a id="navDash" class="link-btn" href="#/">Dashboard</a>
+            <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
+            <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
+            <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
+            <a id="navCalendar" class="link-btn" href="#/calendar" hidden>Calendar</a>
+            <button id="manageBtn" class="link-btn" hidden>Categories</button>
+            <button id="logoutBtn" class="link-btn" hidden>Log out</button>
+          </nav>
+        </details>
       </header>
 
       <!-- Global status / errors -->
@@ -84,10 +88,7 @@
 
       <!-- ADMIN -->
       <section id="adminView" class="card" hidden>
-        <div class="row" style="justify-content:space-between">
-          <h2>Categories</h2>
-          <button id="backToDashBtn" class="link-btn">← Dashboard</button>
-        </div>
+        <h2>Categories</h2>
         <div class="field cat-pick">
           <label class="field-label" for="catPick">Edit an existing category</label>
           <div class="row" style="margin:0">
@@ -165,9 +166,9 @@
             </div>
 
             <div class="field">
-              <label class="field-label" for="catBonus">Bonus for an unused freeze ($)</label>
+              <label class="field-label" for="catBonus">Bonus per unused freeze ($)</label>
               <input id="catBonus" type="number" step="0.01" min="0" inputmode="decimal" placeholder="0 = no bonus" />
-              <p class="hint">Paid at each freeze refresh if you didn't need a freeze.</p>
+              <p class="hint">Paid at each freeze refresh, once for every freeze you didn't need — two freezes left over pay twice. A habit with no freezes never earns it.</p>
             </div>
 
             <div class="field">
@@ -233,10 +234,7 @@
 
       <!-- INBOX: uncategorized bank transactions -->
       <section id="inboxView" class="card" hidden>
-        <div class="row" style="justify-content:space-between">
-          <h2>Inbox</h2>
-          <a class="link-btn" href="#/">← Dashboard</a>
-        </div>
+        <h2>Inbox</h2>
         <div class="row seg">
           <button type="button" id="inboxTabNew" class="seg-on">To sort</button>
           <button type="button" id="inboxTabFiled" class="ghost">Filed</button>
@@ -248,10 +246,7 @@
 
       <!-- ACCOUNTS: linked banks -->
       <section id="accountsView" class="card" hidden>
-        <div class="row" style="justify-content:space-between">
-          <h2>Banks</h2>
-          <a class="link-btn" href="#/">← Dashboard</a>
-        </div>
+        <h2>Banks</h2>
         <div id="bankList"></div>
         <div class="row" style="margin-top:12px">
           <button id="linkBankBtn">＋ Link a bank</button>
@@ -262,16 +257,14 @@
 
       <!-- BUDGET: this month against the trailing average, and history -->
       <section id="budgetView" class="card" hidden>
-        <div class="row" style="justify-content:space-between">
-          <h2>Budget</h2>
-          <a class="link-btn" href="#/">← Dashboard</a>
-        </div>
+        <h2>Budget</h2>
         <div class="row seg">
           <a id="budgetTabMonth" class="seg-on" href="#/budget">This month</a>
           <a id="budgetTabHistory" class="ghost" href="#/budget/history">History</a>
         </div>
         <p id="budgetMeta" class="muted" hidden></p>
         <div id="budgetSummary" hidden></div>
+        <div id="budgetWallets" hidden></div>
         <div id="budgetList"></div>
         <p id="budgetEmpty" class="muted" hidden></p>
       </section>

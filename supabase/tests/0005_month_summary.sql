@@ -3,6 +3,20 @@ select plan(10);
 
 select has_view('public', 'month_summary', 'month_summary exists');
 
+-- Running the node suite against this database leaves rows behind (see the
+-- README), and the views below read every row in the month, not just this
+-- file's. The whole file rolls back, so clearing first costs nothing and makes
+-- the numbers below mean what they say.
+delete from public.transactions;
+delete from public.budget_categories;
+delete from public.accounts;
+delete from public.plaid_items;
+delete from public.events;
+delete from public.ledger;
+delete from public.habit_state;
+delete from public.people;
+delete from public.settings;
+
 -- Fixture: income over the two months before this one, and this month a mix
 -- of filed spend, wallet spend, and unfiled rows of every shape.
 insert into public.people (email, name) values ('ann@x.com', 'Ann') on conflict do nothing;

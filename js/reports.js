@@ -5,7 +5,7 @@
 import { sb } from './api.js';
 import { $, esc, money, denverToday } from './util.js';
 import { barChart } from './chart.js';
-import { summaryHtml } from './summary.js';
+import { summaryHtml, walletsHtml } from './summary.js';
 
 const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const monthLabel = (ym) => { const m = /^(\d{4})-(\d{2})/.exec(ym || ''); return m ? MONTHS[+m[2] - 1] : ''; };
@@ -17,11 +17,12 @@ export async function renderBudget(view) {
   const empty = $('budgetEmpty');
   const meta = $('budgetMeta');
   const summary = $('budgetSummary');
+  const wallets = $('budgetWallets');
   list.innerHTML = '<p class="muted">Loading…</p>';
-  empty.hidden = true; meta.hidden = true; summary.hidden = true;
+  empty.hidden = true; meta.hidden = true; summary.hidden = true; wallets.hidden = true;
   try {
     if (view === 'history') await renderHistory(list, empty, meta);
-    else await renderMonth(list, empty, meta, summary);
+    else await renderMonth(list, empty, meta, summary, wallets);
   } catch (err) {
     list.innerHTML = '';
     empty.hidden = false;
@@ -29,10 +30,11 @@ export async function renderBudget(view) {
   }
 }
 
-async function renderMonth(list, empty, meta, summary) {
-  const [pace, month] = await Promise.all([
+async function renderMonth(list, empty, meta, summary, wallets) {
+  const [pace, month, wallet] = await Promise.all([
     sb.from('category_pace').select('*'),
     sb.from('month_summary').select('*').single(),
+    sb.from('wallet_month').select('*').order('name'),
   ]);
   if (pace.error) throw new Error(pace.error.message);
   if (month.error) throw new Error(month.error.message);
@@ -43,6 +45,11 @@ async function renderMonth(list, empty, meta, summary) {
     (w.months_in_window ? ' · average over the last ' + w.months_in_window + ' month' + (w.months_in_window === 1 ? '' : 's') : ' · no history yet');
   summary.hidden = false;
   summary.innerHTML = summaryHtml(w);
+  // The wallets block is an extra, not the screen. Pages can deploy before the
+  // migration lands, and a missing view must not blank the whole month.
+  const walletHtml = wallet.error ? '' : walletsHtml(wallet.data);
+  wallets.innerHTML = walletHtml;
+  wallets.hidden = !walletHtml;
   list.innerHTML = '';
   if (!data.length) { empty.hidden = false; empty.textContent = 'No spending categories yet.'; return; }
   // Over-pace first, then by how far over, then by spend.

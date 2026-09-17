@@ -4,6 +4,20 @@ select plan(18);
 select has_view('public', 'monthly_actuals', 'monthly_actuals exists');
 select has_view('public', 'category_pace', 'category_pace exists');
 
+-- Running the node suite against this database leaves rows behind (see the
+-- README), and the views below read every row in the month, not just this
+-- file's. The whole file rolls back, so clearing first costs nothing and makes
+-- the numbers below mean what they say.
+delete from public.transactions;
+delete from public.budget_categories;
+delete from public.accounts;
+delete from public.plaid_items;
+delete from public.events;
+delete from public.ledger;
+delete from public.habit_state;
+delete from public.people;
+delete from public.settings;
+
 -- Fixture: one bank, one account, categories, and transactions spread over
 -- this month and the two before it, dated relative to today in Denver.
 insert into public.people (email, name) values ('ann@x.com', 'Ann') on conflict do nothing;

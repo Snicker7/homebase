@@ -21,3 +21,19 @@ export function summaryHtml(r) {
     '</div>'
   );
 }
+
+// The personal wallets beneath it: what the habit and chore side paid each of
+// you this month, and what left the wallet. One row per person, built from
+// wallet_month. Pure, like summaryHtml.
+export function walletsHtml(rows) {
+  if (!rows || !rows.length) return '';
+  const line = (w) =>
+    '<div class="summary-part"><span>' + esc(w.name) + '</span>' +
+    '<span>' + money(w.earned) + ' earned · ' + money(-Number(w.spent)) + ' spent</span></div>';
+  return (
+    '<div class="summary">' +
+      '<div class="summary-lead"><span class="summary-label">Wallets this month</span></div>' +
+      '<div class="summary-parts">' + rows.map(line).join('') + '</div>' +
+    '</div>'
+  );
+}

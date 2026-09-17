@@ -36,6 +36,8 @@ export async function refreshInboxCount() {
   const pill = $('inboxCount');
   pill.textContent = count || '';
   pill.hidden = !count;
+  // The pill lives inside the menu; the dot is what a shut menu can show.
+  $('navDot').hidden = !count;
 }
 
 /* ── the category picker ─────────────────────────────────────────────────── */

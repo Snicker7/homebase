@@ -15,3 +15,20 @@ export function banner(msg, isError) {
   b.className = 'banner' + (isError ? ' error' : ' ok');
   b.hidden = !msg;
 }
+
+// Can this browser actually keep what we store? supabase-js runs the same
+// probe, and when it fails it silently holds the auth session in a plain
+// object that dies with the tab — which reaches the person as "log in again in
+// every new tab". Probing it here lets the app say so instead.
+export function storageWritable(store) {
+  try {
+    if (!store) return false;
+    const k = 'hb-probe-' + Math.random();
+    store.setItem(k, k);
+    const kept = store.getItem(k) === k;
+    store.removeItem(k);
+    return kept;
+  } catch {
+    return false;
+  }
+}
