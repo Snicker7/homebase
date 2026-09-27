@@ -115,10 +115,16 @@ export function createService(ctx) {
         day = E.shiftDays(day, 1);
         const target = accrualTarget(cat, from, day);
         if (!target) continue;
-        from = target; // anything older is lost — never look back at it again
+        const claimed = E.isChoreClaimed(getRows(), cat.id, target);
+        // Anything older is lost — never look back at it again. A daily chore's
+        // pointer instead marks the start of its unclaimed run, and only moves
+        // once a claim ends that run.
+        if (cat.cadence !== 'daily') from = target;
+        else if (claimed) from = day;
         if (store.isHoliday(day)) continue; // a holiday costs nothing, but the period still ages
-        if (E.isChoreClaimed(getRows(), cat.id, target)) continue;
-        if (E.choreDrainCount(getRows(), cat.id, target) >= E.CHORE_ACCRUAL_CAP) continue;
+        if (claimed) continue;
+        const span = cat.cadence === 'daily' ? E.dailyRunKeys(getRows(), cat.id, target, from) : target;
+        if (E.choreDrainCount(getRows(), cat.id, span) >= E.CHORE_ACCRUAL_CAP) continue;
         applyChorePenalty(cat, target, getRows());
       }
       if (day !== s.chargedThrough) { s.chargedThrough = day; dirty = true; }
@@ -131,7 +137,23 @@ export function createService(ctx) {
   // day, or null when nothing has closed yet.
   function accrualTarget(cat, from, dayStr) {
     if (cat.cadence === 'once') return E.chorePeriodClosed(cat, 'once', dayStr) ? 'once' : null;
+    if (cat.cadence === 'daily') return yesterdayFrom(from, dayStr);
     return E.latestClosedPeriod(cat, from, dayStr);
+  }
+
+  // A daily chore's latest closed period is simply the day before — unless the
+  // sweep pointer sits on `dayStr` itself, when nothing has closed yet. Spelled
+  // out so a pointer years back at the start of a long run costs no walk.
+  function yesterdayFrom(from, dayStr) {
+    const y = E.shiftDays(dayStr, -1);
+    return from <= y ? y : null;
+  }
+
+  // The days a daily chore's pot spans as of `dayStr`: its unclaimed run up to
+  // yesterday. Empty when nothing has closed since the pointer.
+  function dailyRun(cat, floor, dayStr, rows) {
+    const end = yesterdayFrom(floor, dayStr);
+    return end ? E.dailyRunKeys(rows, cat.id, end, floor) : [];
   }
 
   // The one closed period still catchable: the latest one. Older periods are
@@ -139,6 +161,7 @@ export function createService(ctx) {
   // un-claimed row can't resurrect a period the calendar has already passed.
   function catchablePeriod(cat, s, today) {
     if (cat.cadence === 'once') return E.chorePeriodClosed(cat, 'once', today) ? 'once' : null;
+    if (cat.cadence === 'daily') return null; // the pot rides on today's claim instead
     const start = s.sweepFrom > s.since ? s.sweepFrom : s.since;
     return E.latestClosedPeriod(cat, start, today);
   }
@@ -418,12 +441,16 @@ export function createService(ctx) {
     const outstanding = E.outstandingChorePeriods(rows, c.id).filter(function (o) {
       return o.periodKey === catchable && (c.cadence === 'once' || o.periodKey >= st.since);
     });
+    // What today's claim collects on top of the value. Only a daily chore's
+    // missed run rolls forward onto today; other cadences keep their pot on
+    // the back-claim in `outstanding`.
+    const pot = c.cadence === 'daily' ? E.chorePotFor(rows, c.id, dailyRun(c, st.sweepFrom, todayStr(), rows)) : 0;
     return {
       id: c.id, name: c.name, emoji: c.emoji, kind: 'chore', cadence: c.cadence,
       value: c.value, assignee: c.assignee, assigneeName: c.assignee ? store.displayName(c.assignee) : '',
       dueDate: c.dueDate || '', dueDay: c.dueDay || '', notes: c.notes || '',
       claimablePeriodKey: current,
-      claimedBy: anytime ? null : claimant, doneToday: doneToday, outstanding: outstanding,
+      claimedBy: anytime ? null : claimant, doneToday: doneToday, outstanding: outstanding, pot: pot,
       group: E.choreGroup(c, todayStr(), outstanding.length > 0),
     };
   }
@@ -760,6 +787,9 @@ export function createService(ctx) {
     if (cat.cadence === 'anytime' && periodKey !== current) {
       return { ok: false, error: 'this chore has no deadline — there is nothing to catch up' };
     }
+    if (cat.cadence === 'daily' && periodKey !== current) {
+      return { ok: false, error: 'a daily chore is claimed for today — the pot from missed days comes with it' };
+    }
     if (cat.cadence !== 'once' && periodKey < s.since) {
       return { ok: false, error: 'this chore only started being tracked in ' + s.since };
     }
@@ -779,7 +809,10 @@ export function createService(ctx) {
     if (cat.cadence !== 'anytime' && E.isChoreClaimed(getRows(), cat.id, periodKey)) {
       return { ok: false, error: 'already done — ' + periodKey + ' is claimed' };
     }
-    const pot = E.chorePotFor(getRows(), cat.id, periodKey);
+    // The sweep above may have moved the pointer; read it back before spanning the run.
+    const pot = cat.cadence === 'daily'
+      ? E.chorePotFor(getRows(), cat.id, dailyRun(cat, choreStateOf(cat).sweepFrom, todayStr(), getRows()))
+      : E.chorePotFor(getRows(), cat.id, periodKey);
     const total = E.chorePayout(cat, pot);
     // The partner's half rounds down to the cent; the tapper keeps the remainder.
     const partnerAmount = together ? Math.floor(Math.round(total * 100) / 2) / 100 : 0;
@@ -994,7 +1027,7 @@ export function createService(ctx) {
       if (!mine.length) continue;
       const names = mine.map(function (v) { return v.name; }).join(', ');
       const items = mine.map(function (v) {
-        const pot = v.outstanding.reduce(function (sum, o) { return E.round2(sum + o.pot); }, 0);
+        const pot = v.outstanding.reduce(function (sum, o) { return E.round2(sum + o.pot); }, v.pot || 0);
         return '<li><b>' + E.escapeHtml(v.emoji || '🧹') + ' ' + E.escapeHtml(v.name) + '</b> — ' + money(v.value) +
           (v.assignee ? '' : ' (shared)') +
           (pot > 0 ? '. A pot of <b>' + money(pot) + '</b> is waiting from missed ' + (v.cadence === 'once' ? 'time' : 'periods') : '') +

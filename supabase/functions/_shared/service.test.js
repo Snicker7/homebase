@@ -578,3 +578,89 @@ test('saveCategory: switching a daily chore to anytime drops its deadline and it
   assert.strictEqual(view.group, 'anytime');
   assert.strictEqual(view.doneToday, 0);
 });
+
+/* ── daily chores: the missed run is one pot ─────────────────────────────── */
+// Dishes is shared and worth $2. Tracking began Sep 1; nobody has touched them.
+const dailyRun = () => makeCtx({
+  categories: [DISHES],
+  choreStates: [{ category: 'dishes', state: { since: '2026-09-01', sweepFrom: '2026-09-01', chargedThrough: '2026-09-01' } }],
+  nowIso: '2026-09-02T16:00:00Z',
+});
+const dayIso = (d) => d + 'T16:00:00Z';
+const penaltiesOn = (store, key) => store.readLedgerRows().filter((r) => r.type === 'penalty' && r.periodKey === key);
+
+test('daily chore: each missed day drains once more into one rolling pot, capped at five drains', () => {
+  const { ctx, store } = dailyRun();
+  const svc = createService(ctx);
+  const view = (d) => { ctx.setNow(dayIso(d)); return svc.route({ action: 'state', user: ANN }); };
+  let r = view('2026-09-02');
+  assert.strictEqual(r.chores[0].pot, 2, 'Sep 1 was missed: one drain, $1 from each wallet');
+  assert.deepStrictEqual(r.chores[0].outstanding, [], 'a daily chore has no separate back-claim — the pot rides on today');
+  r = view('2026-09-04');
+  assert.strictEqual(r.chores[0].pot, 6, 'three missed days, three drains');
+  assert.strictEqual(r.wallet, -3);
+  r = view('2026-09-09');
+  assert.strictEqual(r.chores[0].pot, 10, 'the fifth drain is the last');
+  assert.strictEqual(r.wallet, -5);
+  assert.strictEqual(penaltiesOn(store, '2026-09-06').length, 0, 'nothing lands after the cap');
+  assert.strictEqual(store.readLedgerRows().filter((r0) => r0.type === 'penalty').length, 10);
+});
+
+test('daily chore: today\'s claim collects the pot, and the run starts over', () => {
+  const { ctx, store } = dailyRun();
+  const svc = createService(ctx);
+  ctx.setNow(dayIso('2026-09-04'));
+  svc.route({ action: 'state', user: ANN });
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.event.periodKey, '2026-09-04');
+  assert.strictEqual(r.event.pot, 6);
+  assert.strictEqual(r.event.amount, 8);
+  assert.strictEqual(r.wallet, 5, 'three dollars drained, eight back');
+  ctx.setNow(dayIso('2026-09-05'));
+  const next = svc.route({ action: 'state', user: ANN });
+  assert.strictEqual(next.chores[0].pot, 0, 'the claim broke the run');
+  assert.strictEqual(penaltiesOn(store, '2026-09-04').length, 0, 'a claimed day never drains');
+  ctx.setNow(dayIso('2026-09-06'));
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).chores[0].pot, 2, 'a fresh run after the claim');
+});
+
+test('daily chore: a back-claim is refused, since the pot already rides on today', () => {
+  const { ctx } = dailyRun();
+  const svc = createService(ctx);
+  ctx.setNow(dayIso('2026-09-04'));
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes', periodKey: '2026-09-03' });
+  assert.strictEqual(r.ok, false);
+  assert.match(r.error, /today/);
+});
+
+test('daily chore: a joint claim splits value and pot', () => {
+  const { ctx } = dailyRun();
+  const svc = createService(ctx);
+  ctx.setNow(dayIso('2026-09-04'));
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes', together: true });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.event.amount + r.event.partnerAmount, 8);
+});
+
+test('daily chore: the pot does not survive a pause', () => {
+  const { ctx } = dailyRun();
+  const svc = createService(ctx);
+  ctx.setNow(dayIso('2026-09-04'));
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).chores[0].pot, 6);
+  svc.route({ action: 'pauseChores', user: ANN, until: '2026-09-08' });
+  ctx.setNow(dayIso('2026-09-08'));
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).chores[0].pot, 0, 'the paused stretch owes nothing and forgives what was waiting');
+  ctx.setNow(dayIso('2026-09-09'));
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).chores[0].pot, 2, 'the first miss after the break');
+});
+
+test('digest: a daily chore\'s rolling pot is mentioned', async () => {
+  const { ctx, sent } = makeCtx({
+    nowIso: '2026-09-04T14:00:00Z', categories: [DISHES],
+    choreStates: [{ category: 'dishes', state: { since: '2026-09-01', sweepFrom: '2026-09-01', chargedThrough: '2026-09-01' } }],
+  });
+  await createService(ctx).dispatch();
+  assert.strictEqual(sent.length, 2);
+  assert.match(sent[0].html, /\$6\.00/);
+});
