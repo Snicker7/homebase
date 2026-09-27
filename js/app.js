@@ -1,6 +1,6 @@
 // ES module: the browser loads this with <script type="module">.
 import { api, checkup, requestLogin, getSession, signOut, onAuthChange, configured } from './api.js';
-import { $, esc, money, banner, storageWritable } from './util.js';
+import { $, esc, money, banner, storageWritable, denverToday } from './util.js';
 import { renderInbox, refreshInboxCount, wireInboxTabs } from './inbox.js';
 import { renderAccounts } from './bank.js';
 import { renderBudget } from './reports.js';
@@ -54,7 +54,7 @@ let walletAnim = 0;
 function setWallet(n) {
   const el = $('wallet');
   const to = Number(n) || 0;
-  el.closest('.stat').classList.toggle('negative', to < 0);
+  $('stripMe').classList.toggle('negative', to < 0);
   const from = walletShown;
   cancelAnimationFrame(walletAnim);
   if (from === null || Math.abs(to - from) < 0.005 || matchMedia('(prefers-reduced-motion: reduce)').matches) {
@@ -71,19 +71,33 @@ function setWallet(n) {
 }
 // Cached state is on screen while the fresh copy loads: dim the wallet a touch.
 function setUpdating(on) {
-  const s = $('wallet').closest('.stat');
-  if (s) s.classList.toggle('updating', !!on);
+  $('stripMe').classList.toggle('updating', !!on);
 }
 
 function setView(name) {
   ['loginView', 'checkinView', 'dashView', 'adminView', 'inboxView', 'accountsView', 'budgetView', 'calendarView'].forEach((v) => ($(v).hidden = true));
   $({ login: 'loginView', checkin: 'checkinView', dash: 'dashView', admin: 'adminView', inbox: 'inboxView', accounts: 'accountsView', budget: 'budgetView', calendar: 'calendarView' }[name]).hidden = false;
+  $('loginBrand').hidden = name !== 'login';
+  // The strip and the tabs are the shell: present on every signed-in screen.
   $('navMenu').hidden = !SIGNED_IN;
-  $('logoutBtn').hidden = !SIGNED_IN;
-  $('navInbox').hidden = !SIGNED_IN;
-  $('navAccounts').hidden = !SIGNED_IN;
-  $('navBudget').hidden = !SIGNED_IN;
-  $('navCalendar').hidden = !SIGNED_IN;
+  $('strip').hidden = !SIGNED_IN;
+  $('moreMenu').open = false;
+  const tab = { dash: 'navDash', admin: null, inbox: 'navInbox', accounts: null, budget: 'navBudget', calendar: 'navCalendar' }[name];
+  ['navDash', 'navInbox', 'navBudget', 'navCalendar'].forEach((id) => {
+    if (id === tab) $(id).setAttribute('aria-current', 'page'); else $(id).removeAttribute('aria-current');
+  });
+  if (SIGNED_IN && walletShown === null) paintStripFromCache();
+}
+
+// The strip paints from the last dashboard fetch until this screen's own
+// state call lands, so a deep link to the Inbox still shows the wallets.
+function paintStripFromCache() {
+  let cached = null;
+  try { cached = JSON.parse(localStorage.getItem('hb_state') || 'null'); } catch { /* ignore */ }
+  if (cached && cached.ok) { renderStrip(cached); return; }
+  // Nothing fetched yet on this browser: say so rather than show a zero balance.
+  $('wallet').textContent = '—';
+  $('tally').textContent = 'Open Home to load your wallet.';
 }
 
 // #/inbox, #/accounts, #/budget(/history) and #/calendar(/month|/day) are screens; anything else is the dashboard.
@@ -110,10 +124,7 @@ let SIGNED_IN = false;
 
 /* ── rendering ──────────────────────────────────────────────────────────────*/
 function render(r) {
-  $('whoami').textContent = r.name || r.user || '';
-  setWallet(r.wallet);
-  $('manageBtn').hidden = false;
-  renderPartner(r.partner);
+  renderStrip(r);
   renderCatCards(r.cats || []);
   PARTNER_NAME = (r.partner && r.partner.name) || 'your partner';
   renderChoreCards(r.chores || [], r.pauseUntil || '', r.user);
@@ -121,12 +132,53 @@ function render(r) {
   refreshInboxCount().catch(() => {});
 }
 
+function renderStrip(r) {
+  $('whoami').textContent = r.name || r.user || '';
+  $('moreWho').textContent = r.user || '';
+  setWallet(r.wallet);
+  renderPartner(r.partner);
+  renderTally(r.ledger || []);
+}
+
 function renderPartner(p) {
   const card = $('partnerCard');
   if (!p) { card.hidden = true; return; }
   card.hidden = false;
-  $('partnerName').textContent = (p.name || 'Partner') + "'s wallet";
+  $('partnerName').textContent = p.name || 'Partner';
   $('partnerWallet').textContent = money(p.wallet);
+}
+
+// Today's movement under the balance: what came in and what went out, from
+// the recent lines the state call already carries.
+function renderTally(rows) {
+  const today = denverToday();
+  let inn = 0, out = 0;
+  rows.forEach((e) => {
+    if (rowDay(e) !== today) return;
+    const v = signedAmount(e);
+    if (v > 0) inn += v; else out -= v;
+  });
+  const el = $('tally');
+  if (!inn && !out) { el.textContent = 'Nothing has moved yet today.'; return; }
+  el.innerHTML = 'Today ' +
+    (inn ? '<span class="num plus">+' + money(inn) + '</span>' : '') +
+    (inn && out ? ' <span class="dim">·</span> ' : '') +
+    (out ? '<span class="num minus">−' + money(out) + '</span>' : '');
+}
+
+// Which day a ledger line belongs to: the day it happened, in Denver.
+function rowDay(e) {
+  if (e.timestamp) {
+    const d = new Date(e.timestamp);
+    if (!isNaN(d.getTime())) return new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Denver' }).format(d);
+  }
+  return String(e.periodKey || '');
+}
+// A line's effect on the wallet, signed. Spends and card rows carry the amount
+// that left as a positive number.
+function signedAmount(e) {
+  const n = Number(e.amount) || 0;
+  return (e.type === 'spend' || e.type === 'card') ? -n : n;
 }
 
 /* ── habit cards ────────────────────────────────────────────────────────── */
@@ -177,12 +229,12 @@ function renderCatCards(cats) {
   const wrap = $('catCards');
   wrap.innerHTML = '';
   if (!cats.length) {
-    wrap.innerHTML = '<div class="card"><p class="muted">No habits yet. Tap "Categories" to add one.</p></div>';
+    wrap.innerHTML = '<p class="muted block-empty">No habits yet. Add one under More → Categories.</p>';
     return;
   }
   cats.forEach((c) => {
-    const card = document.createElement('section');
-    card.className = 'card habit';
+    const card = document.createElement('article');
+    card.className = 'entry habit';
     const label = (c.emoji ? c.emoji + ' ' : '') + c.name;
     // A nightly habit is answered the morning after, keyed by the date the
     // night began, so "yesterday" reads as "last night" on the card.
@@ -191,17 +243,18 @@ function renderCatCards(cats) {
     const period = nightly && rawPeriod === 'Yesterday' ? 'last night' : rawPeriod;
     const freezes = Number(c.freezeAvailable) || 0;
     const recorded = c.recordedResult;
+    // The stake sentence answers both taps: what a yes pays, what a no costs.
+    const miss = freezes ? 'a miss uses a freeze' : 'a miss resets the streak';
     card.innerHTML =
-      '<div class="habit-head">' +
-      '<h2>' + (c.emoji ? '<span class="glyph">' + esc(c.emoji) + '</span>' : '') + esc(c.name) + '</h2>' +
-      '<div class="streak" title="Current streak"><span class="flame">🔥</span>' + Number(c.streak || 0) + '</div>' +
+      '<div class="entry-head">' +
+      '<span class="entry-glyph">' + esc(c.emoji || '✦') + '</span>' +
+      '<div class="entry-main"><span class="entry-name">' + esc(c.name) + '</span>' +
+      '<span class="entry-sub">' + (nightly ? 'Nightly' : 'Weekly') + ' · ' + esc(period) +
+      (freezes ? ' · ❄️ ' + freezes + ' left' : ' · <span class="dim">no freezes left</span>') + '</span></div>' +
+      '<span class="streak" title="Current streak"><span class="flame">🔥</span>' + Number(c.streak || 0) + '</span>' +
       '</div>' +
-      '<div class="hstrip">' +
-      '<span class="hs"><b class="num">' + money(c.potential) + '</b> if you do it</span>' +
-      '<span class="hs freezes" title="Freezes left this period">' +
-      (freezes ? '❄️'.repeat(Math.min(freezes, 5)) + ' <span class="dim">' + freezes + ' left</span>' : '<span class="dim">no freezes left</span>') +
-      '</span>' +
-      '</div>' +
+      '<p class="stake"><b class="num">' + money(c.potential) + '</b> if you did it <span class="dim">·</span> ' +
+      '<span class="' + (freezes ? 'dim' : 'risk') + '">' + miss + '</span></p>' +
       '<div class="actions" data-mode="record"' + (recorded ? ' hidden' : '') + '>' +
       '<button class="ok" data-result="on_time">Did it</button>' +
       '<button class="danger" data-result="missed">Missed</button>' +
@@ -213,8 +266,7 @@ function renderCatCards(cats) {
       '<div class="ask" hidden><p class="ask-text"></p>' +
       '<div class="ask-btns"><button class="ghost" data-no>Cancel</button><button data-yes>Yes</button></div></div>' +
       '<p class="inline-err" hidden></p>' +
-      '<p class="hmeta">' + (nightly ? 'Nightly · answers for ' : 'Weekly · answers for ') + esc(period) +
-      (recorded ? ' · next opens ' + (nightly ? 'at midnight' : 'Monday') : '') + '</p>' +
+      (recorded ? '<p class="hmeta">Next opens ' + (nightly ? 'at midnight' : 'Monday') + '</p>' : '') +
       '<details class="more"><summary>More</summary>' +
       (c.notes ? '<p class="notes-text">' + esc(c.notes) + '</p>' : '') +
       '<div class="fix-past">' +
@@ -315,7 +367,11 @@ const CHORE_GROUPS = [
 function renderChoreCards(chores, pauseUntil, me) {
   const wrap = $('choreCards');
   wrap.innerHTML = '';
-  if (chores.length || pauseUntil) renderChorePause(wrap, pauseUntil);
+  if (!chores.length && !pauseUntil) {
+    wrap.innerHTML = '<p class="muted block-empty">No chores yet. Add one under More → Categories.</p>';
+    return;
+  }
+  if (pauseUntil) renderChorePause(wrap, pauseUntil);
   // Every group collapses. Today opens by default since it wants action;
   // the rest open only if this phone left them open last time.
   const groups = { today: [], week: [], month: [], anytime: [], once: [] };
@@ -330,12 +386,12 @@ function renderChoreCards(chores, pauseUntil, me) {
     const det = document.createElement('details');
     det.className = 'chore-group';
     det.open = g.key in remembered ? !!remembered[g.key] : g.open;
-    det.innerHTML = '<summary>' + g.title + ' — ' + list.length +
-      ' chore' + (list.length === 1 ? '' : 's') + '</summary>';
+    det.innerHTML = '<summary>' + g.title + ' <span class="count">' + list.length + '</span></summary>';
     list.forEach((c) => det.appendChild(choreCard(c, me)));
     det.addEventListener('toggle', () => saveGroupState(g.key, det.open));
     wrap.appendChild(det);
   });
+  if (!pauseUntil) renderChorePause(wrap, '');
 }
 
 function choreCard(c, me) {
@@ -351,41 +407,57 @@ function choreCard(c, me) {
   // An anytime chore is never finished, so it keeps its button and tallies the
   // day instead of showing who closed it out.
   const doneToday = Number(c.doneToday) || 0;
-  const card = document.createElement('div');
-  card.className = 'card';
+  // A daily chore's missed days roll into today's claim. Only a shared chore
+  // gets that money back; an assigned one just shows what the wait cost.
+  const pot = Number(c.pot) || 0;
+  const payout = c.assignee ? c.value : c.value + pot;
+  const sub = [
+    who,
+    cadence.toLowerCase(),
+    (c.cadence === 'weekly' || c.cadence === 'biweekly') && c.dueDay ? 'due ' + (DUE_DAY_NAMES[c.dueDay] || esc(c.dueDay)) : '',
+    c.cadence === 'once' && c.dueDate ? 'due ' + esc(c.dueDate) : '',
+    c.cadence === 'once' || c.cadence === 'anytime' || c.cadence === 'daily' ? '' : esc(chorePeriodLabel(c)),
+  ].filter(Boolean).join(' · ');
+  const card = document.createElement('article');
+  card.className = 'entry chore';
   card.innerHTML =
-    '<h2>' + (c.emoji ? esc(c.emoji) + ' ' : '🧹 ') + esc(c.name) + '</h2>' +
-    '<div class="prow">' +
-    '<div><span class="label">Worth</span><span class="pval">' + money(c.value) + '</span></div>' +
-    '<div><span class="label">Who</span><span class="pval">' + who + '</span></div>' +
-    (c.dueDate ? '<div><span class="label">Due</span><span class="pval">' + esc(c.dueDate) + '</span></div>' : '') +
+    '<div class="entry-head">' +
+    '<span class="entry-glyph">' + esc(c.emoji || '🧹') + '</span>' +
+    '<div class="entry-main"><span class="entry-name">' + esc(c.name) + '</span>' +
+    '<span class="entry-sub">' + sub + '</span></div>' +
+    '<span class="worth' + (pot && !c.assignee ? ' pot-on' : '') + '">' + money(payout) + '</span>' +
     '</div>' +
+    (pot
+      ? '<p class="stake">' + (c.assignee
+        ? '<span class="num">' + money(pot) + '</span> <span class="dim">drained while it waited</span>'
+        : '<span class="num">' + money(c.value) + '</span> <span class="dim">+</span> <span class="num pot">' + money(pot) + '</span> <span class="dim">pot from missed days</span>') + '</p>'
+      : '') +
     (c.claimedBy
-      ? '<p class="chore-done">✓ ' + esc(c.claimedBy) + (c.cadence === 'daily' ? ', today' : '') + '</p>'
+      ? '<p class="chore-done">✓ ' + esc(c.claimedBy) + (c.cadence === 'daily' ? ' <span class="dim">today</span>' : '') + '</p>'
       : mine
-        ? '<div class="actions" style="margin-top:8px"><button class="ok" data-claim>✋ I did it</button>' +
-          (c.assignee ? '' : '<button class="ok-ghost" data-claim-together>🤝 We did it</button>') + '</div>'
-        : '') +
+        ? '<div class="actions"><button class="ok" data-claim>Did it</button>' +
+          (c.assignee ? '' : '<button class="ok-ghost" data-claim-together>Together</button>') + '</div>'
+        : '<p class="hmeta">' + esc(c.assigneeName) + '\u2019s to claim</p>') +
     (doneToday ? '<p class="chore-done">✓ done ' + doneToday + '× today</p>' : '') +
-    '<p class="muted">' + cadence +
-    ((c.cadence === 'weekly' || c.cadence === 'biweekly') && c.dueDay ? ' • due ' + (DUE_DAY_NAMES[c.dueDay] || esc(c.dueDay)) : '') +
-    (c.cadence === 'once' || c.cadence === 'anytime' ? '' : ' • ' + esc(chorePeriodLabel(c))) + '</p>' +
+    '<div class="ask" hidden><p class="ask-text"></p>' +
+    '<div class="ask-btns"><button class="ghost" data-no>Cancel</button><button data-yes>Yes</button></div></div>' +
+    '<p class="inline-err" hidden></p>' +
     (c.notes
-      ? '<details class="notes"><summary>📝 Notes</summary><p class="notes-text">' + esc(c.notes) + '</p></details>'
+      ? '<details class="notes"><summary>Notes</summary><p class="notes-text">' + esc(c.notes) + '</p></details>'
       : '') +
     // At most one period is ever catchable — older ones are gone for good.
     (outstanding.length && mine
-      ? '<details class="catch-up" open><summary>💰 Catch up — ' +
-        money(outstanding[0].pot) + ' in the pot</summary>' +
-        '<p class="muted catch-note">Last chance: this one is lost when ' +
-        (c.cadence === 'once' ? 'it is archived' : 'the next one comes due') + '.</p>' +
-        outstanding.map((o) =>
-          '<div class="row catch-row"><span class="muted">' + esc(periodLabel(o.periodKey)) + '</span>' +
-          '<span class="catch-btns"><button class="ok" data-claim-past="' + esc(o.periodKey) + '">Claim ' +
-          money(c.assignee ? c.value : c.value + o.pot) + '</button>' +
+      ? outstanding.map((o) =>
+          '<div class="catchup">' +
+          '<p class="catchup-text">' + esc(periodLabel(o.periodKey)) + ' is still open' +
+          (c.assignee
+            ? ' <span class="dim">· ' + money(o.pot) + ' drained</span>'
+            : ' <span class="dim">·</span> <span class="num">' + money(c.value + o.pot) + '</span> with the pot') +
+          '. Lost when ' + (c.cadence === 'once' ? 'it is archived' : 'the next one comes due') + '.</p>' +
+          '<div class="catch-btns"><button class="ok" data-claim-past="' + esc(o.periodKey) + '">Did it<span class="amt">' +
+          money(c.assignee ? c.value : c.value + o.pot) + '</span></button>' +
           (c.assignee ? '' : '<button class="ok-ghost" data-claim-past-together="' + esc(o.periodKey) + '">Together</button>') +
-          '</span></div>').join('') +
-        '</details>'
+          '</div></div>').join('')
       : '');
   const claim = async (periodKey, together, btn) => {
     if (inFlight) return;
@@ -395,7 +467,7 @@ function choreCard(c, me) {
       if (periodKey) body.periodKey = periodKey;
       if (together) body.together = true;
       const r = await api('claim', body);
-      if (!r.ok) { banner(r.error || 'Could not claim', true); return; }
+      if (!r.ok) { cardError(card, r.error || 'Could not claim'); return; }
       if (typeof r.wallet === 'number') setWallet(r.wallet);
       const e = r.event;
       banner('🧹 ' + label + (e.together
@@ -403,7 +475,7 @@ function choreCard(c, me) {
         : ' — +' + money(e.amount)) +
         (e.pot > 0 ? ' (includes the ' + money(e.pot) + ' pot)' : '') + '.', false);
       await showDashboard(true);
-    } catch (err) { banner(err.message, true); } finally { endWork(btn); }
+    } catch (err) { cardError(card, err.message); } finally { endWork(btn); }
   };
   const wire = (sel, attr, together) => card.querySelectorAll(sel).forEach((b) =>
     b.addEventListener('click', () => claim(attr ? b.getAttribute(attr) : null, together, b)));
@@ -418,18 +490,17 @@ function choreCard(c, me) {
 // reminder emails) until a chosen date, with an early-resume escape hatch.
 function renderChorePause(wrap, pauseUntil) {
   const card = document.createElement('div');
-  card.className = 'card';
   if (pauseUntil) {
+    card.className = 'paused';
     card.innerHTML =
-      '<h2>⏸️ Chores paused</h2>' +
-      '<p class="muted">No penalties or reminders until <b>' + esc(pauseUntil) +
-      '</b> — everything that comes due while you\'re away is forgiven. Claims still pay if you do one anyway.</p>' +
-      '<div class="row"><button data-resume>▶️ Resume now</button></div>';
+      '<h2>Chores are paused until ' + esc(pauseUntil) + '</h2>' +
+      '<p class="muted">Nothing drains and nobody is emailed. Whatever comes due while you\'re away is forgiven. Claims still pay if you do one anyway.</p>' +
+      '<div class="row"><button class="ghost" data-resume>Resume now</button></div>';
   } else {
     card.innerHTML =
-      '<details class="pause-chores"><summary>✈️ Going out of town?</summary>' +
-      '<p class="muted">Pause every chore — no penalties, no reminder emails — until the day you\'re back. They restart that morning on their own.</p>' +
-      '<div class="row"><input type="date" data-pause-until /> <button data-pause>⏸️ Pause chores</button></div>' +
+      '<details class="pause-chores"><summary>Going out of town? Pause the chores ›</summary>' +
+      '<p class="muted">No penalties, no emails, until the day you\'re back. They restart that morning on their own.</p>' +
+      '<div class="row"><input type="date" data-pause-until aria-label="Back on" /> <button class="ghost" data-pause>Pause</button></div>' +
       '</details>';
   }
   wrap.appendChild(card);
@@ -466,7 +537,7 @@ function describe(e) {
   if (e.type === 'deposit') return { icon: '💵', text: e.note || 'Added money', sub: '' };
   if (e.type === 'bonus') return { icon: '🎁', text: e.note || 'Bonus', sub: cat || '' };
   if (e.type === 'claim') return { icon: '🧹', text: 'Did it', sub: cat || '' };
-  if (e.type === 'penalty') return { icon: '⚠️', text: e.note || 'Unclaimed', sub: cat || '' };
+  if (e.type === 'penalty') return { icon: '⚠️', text: (cat ? cat + ' ' : '') + 'not done', sub: 'drained' };
   if (e.type === 'entry') {
     if (e.result === 'on_time') return { icon: '✅', text: 'Done', sub: cat || '' };
     if (e.freezeUsed) return { icon: '❄️', text: 'Freeze used', sub: cat || '' };
@@ -489,7 +560,9 @@ function renderLedger(rows) {
   $('ledgerEmpty').hidden = rows.length > 0;
   let lastDay = null;
   rows.forEach((e) => {
-    const when = String(e.periodKey || (e.timestamp || '').slice(0, 10) || '');
+    // Lines group by the day they happened; the period they are about, when
+    // it differs, rides in the sub-line ("Bedtime · last night").
+    const when = rowDay(e);
     if (when !== lastDay) {
       const h = document.createElement('p');
       h.className = 'feed-day';
@@ -498,6 +571,11 @@ function renderLedger(rows) {
       lastDay = when;
     }
     const d = describe(e);
+    const pk = String(e.periodKey || '');
+    if (pk && pk !== when && e.type !== 'spend' && e.type !== 'card' && e.type !== 'deposit') {
+      const about = periodLabel(pk);
+      d.sub = (d.sub ? d.sub + ' · ' : '') + (about === 'Yesterday' && e.type === 'entry' ? 'last night' : about);
+    }
     const a = amountCell(e);
     const canDelete = e.canDelete !== undefined ? e.canDelete : (e.type === 'spend' || e.type === 'deposit');
     const isEntry = e.type === 'entry';
@@ -889,9 +967,12 @@ function wire() {
   });
 
   // A <details> stays open after a link inside it is followed, and the next
-  // screen would render behind an open panel.
-  $('navMenu').addEventListener('click', (e) => {
-    if (e.target.closest('.menu-items')) $('navMenu').open = false;
+  // screen would render behind an open sheet.
+  $('moreMenu').addEventListener('click', (e) => {
+    if (e.target.closest('.more-sheet')) $('moreMenu').open = false;
+  });
+  document.addEventListener('click', (e) => {
+    if ($('moreMenu').open && !e.target.closest('#moreMenu')) $('moreMenu').open = false;
   });
   // Every screen leaves through this one link now. The admin screen is not a
   // route — it is reached by a button while the hash still reads '#/' — and

@@ -1164,3 +1164,31 @@ test('refresh pays nothing on a category that grants no freezes at all', () => {
   assert.strictEqual(r.balance, 10, 'no freezes means none went unused');
   assert.strictEqual(r.event, null);
 });
+
+test('dailyRunKeys walks back from the latest closed day to the floor, stopping at a claim', () => {
+  const rows = [
+    crow('penalty', '2026-09-03', 'a@x.com', -1), crow('penalty', '2026-09-03', 'b@x.com', -1),
+    crow('claim', '2026-09-02', 'a@x.com', 2),
+    crow('penalty', '2026-09-01', 'a@x.com', -1), crow('penalty', '2026-09-01', 'b@x.com', -1),
+  ];
+  assert.deepStrictEqual(E.dailyRunKeys(rows, 'dishes', '2026-09-05', '2026-08-30'), ['2026-09-05', '2026-09-04', '2026-09-03'],
+    'the run bridges days with no penalty rows and stops at the claim');
+  assert.deepStrictEqual(E.dailyRunKeys(rows, 'dishes', '2026-09-05', '2026-09-04'), ['2026-09-05', '2026-09-04'], 'the floor bounds it');
+  assert.deepStrictEqual(E.dailyRunKeys(rows, 'dishes', '2026-09-02', '2026-08-30'), [], 'a claimed end day is no run at all');
+  assert.deepStrictEqual(E.dailyRunKeys(rows, 'dishes', '2026-09-01', '2026-09-02'), [], 'an end before the floor is empty');
+});
+
+test('chorePotFor and choreDrainCount take a run of keys as well as one key', () => {
+  const rows = [
+    crow('penalty', '2026-09-03', 'a@x.com', -1), crow('penalty', '2026-09-03', 'b@x.com', -1),
+    crow('penalty', '2026-09-04', 'a@x.com', -1), crow('penalty', '2026-09-04', 'b@x.com', -1),
+    crow('penalty', '2026-09-04', 'a@x.com', -1), crow('penalty', '2026-09-04', 'b@x.com', -1),
+  ];
+  assert.strictEqual(E.chorePotFor(rows, 'dishes', ['2026-09-05', '2026-09-04', '2026-09-03']), 6);
+  assert.strictEqual(E.choreDrainCount(rows, 'dishes', ['2026-09-05', '2026-09-04', '2026-09-03']), 3);
+  assert.strictEqual(E.choreDrainCount(rows, 'dishes', '2026-09-04'), 2, 'the single-key form still works');
+});
+
+test('resumeSweepFrom on a daily chore lands on the resume day without walking', () => {
+  assert.strictEqual(E.resumeSweepFrom({ cadence: 'daily' }, '2024-01-01', '2026-06-25'), '2026-06-25');
+});

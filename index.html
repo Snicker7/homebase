@@ -5,33 +5,54 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="robots" content="noindex, nofollow" />
     <meta name="color-scheme" content="dark light" />
-    <title>Habit Builder</title>
+    <title>Homebase</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Source+Sans+3:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&display=swap" />
     <link rel="stylesheet" href="css/style.css" />
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>" />
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🏠</text></svg>" />
   </head>
   <body>
     <main class="wrap">
-      <header class="topbar">
-        <h1>🌱 Habit Builder</h1>
-        <details id="navMenu" class="menu">
-          <summary class="menu-btn" aria-label="Menu" title="Menu">☰<span id="navDot" class="dot" hidden></span></summary>
-          <nav class="menu-items">
-            <span id="whoami" class="muted menu-who"></span>
-            <a id="navDash" class="link-btn" href="#/">Dashboard</a>
-            <a id="navInbox" class="link-btn" href="#/inbox" hidden>Inbox <span id="inboxCount" class="pill" hidden></span></a>
-            <a id="navAccounts" class="link-btn" href="#/accounts" hidden>Banks</a>
-            <a id="navBudget" class="link-btn" href="#/budget" hidden>Budget</a>
-            <a id="navCalendar" class="link-btn" href="#/calendar" hidden>Calendar</a>
-            <button id="manageBtn" class="link-btn" hidden>Categories</button>
-            <button id="logoutBtn" class="link-btn" hidden>Log out</button>
-          </nav>
-        </details>
+      <!-- The ledger strip: both wallets, on every screen. -->
+      <header id="strip" class="strip" hidden>
+        <span class="strip-brand">Homebase</span>
+        <a id="stripMe" class="strip-me" href="#/">
+          <span id="whoami" class="strip-name"></span>
+          <span id="wallet" class="strip-amt">$0.00</span>
+        </a>
+        <span id="partnerCard" class="strip-partner" hidden>
+          <span id="partnerName" class="strip-name"></span>
+          <span id="partnerWallet" class="strip-amt">$0.00</span>
+        </span>
+        <span id="tally" class="strip-tally"></span>
       </header>
+
+      <!-- The four rooms of the house, one tap away from any of them. -->
+      <nav id="navMenu" class="tabs" hidden>
+        <a id="navDash" class="tab" href="#/">Home</a>
+        <a id="navInbox" class="tab" href="#/inbox">Inbox <span id="inboxCount" class="pill" hidden></span><span id="navDot" class="dot" hidden></span></a>
+        <a id="navBudget" class="tab" href="#/budget">Budget</a>
+        <a id="navCalendar" class="tab" href="#/calendar">Calendar</a>
+        <details id="moreMenu" class="more-tab">
+          <summary class="tab-btn">More</summary>
+          <div class="more-sheet">
+            <span id="moreWho" class="more-who"></span>
+            <a id="navAccounts" class="link-btn" href="#/accounts">Banks</a>
+            <button id="manageBtn" class="link-btn" type="button">Categories</button>
+            <button id="logoutBtn" class="link-btn" type="button">Log out</button>
+          </div>
+        </details>
+      </nav>
 
       <!-- Global status / errors -->
       <p id="banner" class="banner" hidden></p>
 
       <!-- LOGIN -->
+      <div class="login-brand" id="loginBrand" hidden>
+        <h1>🏠 Homebase</h1>
+        <p class="muted">Habits, chores, and the household books — for two.</p>
+      </div>
       <section id="loginView" class="card" hidden>
         <h2>Log in</h2>
         <p class="muted">Enter your email and we'll send you a one-tap link. The link is good for an hour; once you're in, you stay logged in.</p>
@@ -50,40 +71,32 @@
         <button id="checkinDoneBtn" class="link-btn" hidden>Go to dashboard →</button>
       </section>
 
-      <!-- DASHBOARD -->
+      <!-- DASHBOARD: one ledger page, sections ruled off -->
       <section id="dashView" hidden>
-        <div class="stats">
-          <div class="stat big">
-            <span class="label">Your wallet</span>
-            <span id="wallet" class="value">$0.00</span>
-          </div>
-        </div>
+        <section class="block">
+          <h2 class="block-title">Habits</h2>
+          <div id="catCards"></div>
+        </section>
 
-        <div class="card partner" id="partnerCard" hidden>
-          <h2>👀 <span id="partnerName">Partner</span></h2>
-          <div class="prow">
-            <div><span class="label">Wallet</span><span id="partnerWallet" class="pval">$0.00</span></div>
-          </div>
-        </div>
+        <section class="block">
+          <h2 class="block-title">Chores</h2>
+          <div id="choreCards"></div>
+        </section>
 
-        <div id="catCards"></div>
-
-        <div id="choreCards"></div>
-
-        <div class="card">
-          <h2>Spend</h2>
-          <form id="spendForm" class="row">
-            <input id="spendAmount" type="number" min="0.01" step="0.01" placeholder="Amount" required />
+        <section class="block">
+          <h2 class="block-title">Spend from your wallet</h2>
+          <form id="spendForm" class="row spend">
+            <input id="spendAmount" type="number" min="0.01" step="0.01" placeholder="0.00" inputmode="decimal" required aria-label="Amount" />
             <input id="spendNote" type="text" placeholder="What for?" />
-            <button type="submit">Spend</button>
+            <button type="submit" class="ghost">Spend</button>
           </form>
-        </div>
+        </section>
 
-        <div class="card">
-          <h2>Recent activity</h2>
+        <section class="block">
+          <h2 class="block-title">Activity <span class="hint-inline">your last 20 lines</span></h2>
           <div id="ledger" class="feed"></div>
-          <p id="ledgerEmpty" class="muted" hidden>Nothing yet.</p>
-        </div>
+          <p id="ledgerEmpty" class="muted block-empty" hidden>Nothing yet.</p>
+        </section>
       </section>
 
       <!-- ADMIN -->
@@ -206,7 +219,7 @@
                 <option value="sat">Saturday</option>
                 <option value="sun">Sunday</option>
               </select>
-              <p class="hint">The week's chore must be done by this day — after it, the value drains again each day (up to 5 days' worth). Once the next week comes due, the missed one is gone: you can't do it twice.</p>
+              <p class="hint">The week's chore must be done by this day — after it, the value drains again each day (up to 5 days' worth). Once the next week comes due, the missed one is gone: you can't do it twice. A daily chore rolls its missed days into one pot instead, and whoever finally does it collects it.</p>
             </div>
             <div class="field">
               <label class="field-label" for="catDueDate">Due date (one-time chores)</label>
@@ -340,8 +353,9 @@
         </details>
       </section>
 
-      <footer class="foot muted">Build the habit, bank the reward 🌱</footer>
+      <footer class="foot">Build the habit, bank the reward.</footer>
     </main>
+
 
     <script src="js/vendor/supabase.js"></script>
     <script src="js/config.js"></script>

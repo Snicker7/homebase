@@ -192,15 +192,41 @@ function isChoreClaimed(rows, categoryId, periodKey) {
   return false;
 }
 
-/** What an unclaimed period has drained so far — the amount a late claim collects. */
+// The pot helpers take one period key or a run of them (see dailyRunKeys).
+function keySet(periodKey) {
+  var set = {};
+  (Array.isArray(periodKey) ? periodKey : [periodKey]).forEach(function (k) { set[String(k)] = true; });
+  return set;
+}
+
+/** What an unclaimed period (or run) has drained so far — the amount a claim collects. */
 function chorePotFor(rows, categoryId, periodKey) {
+  var keys = keySet(periodKey);
   var pot = 0;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     if (r.type === 'penalty' && String(r.category) === String(categoryId) &&
-        String(r.periodKey) === String(periodKey)) pot -= Number(r.amount) || 0;
+        keys[String(r.periodKey)]) pot -= Number(r.amount) || 0;
   }
   return round2(pot);
+}
+
+/**
+ * A daily chore's missed days are one pot, not one per day: a new day coming
+ * due does not wipe the old debt the way a new week does. The run is every
+ * unclaimed day walking back from `endKey` (the latest closed day) to `floor`
+ * (the chore's sweep pointer), stopping at a claim. Days that drained nothing
+ * — holidays, days past the cap — are still part of it.
+ */
+function dailyRunKeys(rows, categoryId, endKey, floor) {
+  var keys = [];
+  var key = String(endKey);
+  while (key >= String(floor)) {
+    if (isChoreClaimed(rows, categoryId, key)) break;
+    keys.push(key);
+    key = shiftDays(key, -1);
+  }
+  return keys;
 }
 
 /** Penalized periods still waiting for a doer, oldest first. */
@@ -289,6 +315,8 @@ function latestClosedPeriod(cat, from, dayStr) {
  * sweep resumes after a pause, forgiving everything that closed during it.
  */
 function resumeSweepFrom(cat, sweepFrom, resumeDate) {
+  // A daily pointer can sit years back at the start of a long run; no need to walk.
+  if (cat.cadence === 'daily') return sweepFrom > resumeDate ? sweepFrom : resumeDate;
   var key = sweepFrom;
   var guard = 0;
   while (chorePeriodClosed(cat, key, resumeDate) && guard++ < 400) {
@@ -309,12 +337,13 @@ var CHORE_ACCRUAL_CAP = 5;
  * as assigned counts double, and the drain cap trips at half the days.
  */
 function choreDrainCount(rows, categoryId, periodKey) {
+  var keys = keySet(periodKey);
   var byActor = {};
   var max = 0;
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i];
     if (r.type !== 'penalty' || String(r.category) !== String(categoryId) ||
-        String(r.periodKey) !== String(periodKey)) continue;
+        !keys[String(r.periodKey)]) continue;
     var a = String(r.actor || '');
     byActor[a] = (byActor[a] || 0) + 1;
     if (byActor[a] > max) max = byActor[a];
@@ -847,7 +876,7 @@ function validateCategory(cat) {
 export {
   round2, payout, isoWeek, periodKeyFor, shiftDays, mondayOf, isoDow,
   periodKeyDate, freezePeriodStart, validPeriodKey, claimablePeriodKey,
-  choreKeyFitsCadence, repairChoreState, isChoreClaimed, chorePotFor,
+  choreKeyFitsCadence, repairChoreState, isChoreClaimed, chorePotFor, dailyRunKeys,
   outstandingChorePeriods, nextChorePeriodKey, choreDueDateFor,
   chorePeriodClosed, latestClosedPeriod, resumeSweepFrom, choreDrainCount,
   choreGroup, chorePenaltyAmounts, chorePayout, isTrueFlag,
