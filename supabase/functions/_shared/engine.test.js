@@ -335,6 +335,27 @@ test('miss penalty rounds an odd streak up to the larger half', () => {
   assert.strictEqual(r.state.streak, 3);
 });
 
+test('miss penalty on a long streak counts from twice the payout cap', () => {
+  // 0.25 increment, 5.00 max: payout tops out at streak 20. A 150-day streak
+  // is clamped to 40 before halving, so the first unfrozen miss lands on 20
+  // (still max payout) and the second one costs money.
+  const s = { streak: 150, periodStart: '2026-06-22', freezesUsedThisPeriod: 1, lastRecordedKey: null };
+  const cat = Object.assign({}, CAT, { missPenaltyPercent: 50 });
+  const first = E.applyEntry(s, 0, cat, { periodKey: '2026-06-23', result: 'missed', actor: 'a' });
+  assert.strictEqual(first.state.streak, 20);
+  const second = E.applyEntry(first.state, 0, cat, { periodKey: '2026-06-24', result: 'missed', actor: 'a' });
+  assert.strictEqual(second.state.streak, 10);
+});
+
+test('miss penalty cap streak accounts for minPayout', () => {
+  // start 1.00, +0.25 per day, max 5.00: payout tops out at streak 17, so the
+  // clamp sits at 34.
+  const s = { streak: 100, periodStart: '2026-06-22', freezesUsedThisPeriod: 1, lastRecordedKey: null };
+  const r = E.applyEntry(s, 0, Object.assign({}, CAT, { missPenaltyPercent: 50, minPayout: 1 }),
+    { periodKey: '2026-06-23', result: 'missed', actor: 'a' });
+  assert.strictEqual(r.state.streak, 17);
+});
+
 test('a freeze preserves the streak whatever the miss penalty is', () => {
   const s = { streak: 7, periodStart: '2026-06-22', freezesUsedThisPeriod: 0, lastRecordedKey: null };
   const r = E.applyEntry(s, 0, Object.assign({}, CAT, { missPenaltyPercent: 50 }),
@@ -638,6 +659,16 @@ test('replayCategory spends one freeze then penalizes the second miss', () => {
   assert.deepStrictEqual(r.entries.map((e) => e.amount), [0.25, 0, 0, 0.25]);
   assert.strictEqual(r.state.streak, 1);
   assert.strictEqual(r.state.freezesUsedThisPeriod, 1);
+});
+
+test('replayCategory applies the miss penalty from twice the payout cap on a long streak', () => {
+  const cat = Object.assign({}, RCAT, { freezesPerPeriod: 0, missPenaltyPercent: 50 });
+  const days = [];
+  for (let i = 1; i <= 31; i++) days.push(entry('2026-05-' + String(i).padStart(2, '0'), 'on_time'));
+  for (let i = 1; i <= 14; i++) days.push(entry('2026-06-' + String(i).padStart(2, '0'), 'on_time'));
+  days.push(entry('2026-06-15', 'missed'));
+  const r = E.replayCategory(cat, days, '2026-06-15');
+  assert.strictEqual(r.state.streak, 20);
 });
 
 test('replayCategory: flipping one answer cascades freezes and payouts', () => {
