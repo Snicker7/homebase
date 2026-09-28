@@ -23,6 +23,25 @@ function payout(cat, streak) {
   return round2(Math.min(start + (streak - 1) * cat.rewardIncrement, cat.maxPerInstance));
 }
 
+/** Smallest streak that already pays maxPerInstance. */
+function capStreak(cat) {
+  var start = cat.minPayout > 0 ? cat.minPayout : cat.rewardIncrement;
+  return Math.ceil((cat.maxPerInstance - start) / cat.rewardIncrement) + 1;
+}
+
+/**
+ * Streak left after an unfrozen miss. The penalty counts from twice the
+ * payout cap, not the raw streak: an unbounded streak could absorb the cut
+ * without ever dropping below max payout, making misses free forever. Twice
+ * the cap leaves a long streak one hidden emergency freeze: the first miss
+ * lands back on the cap, the second one costs money.
+ */
+function penalizedStreak(cat, streak) {
+  var pct = cat.missPenaltyPercent == null ? 100 : cat.missPenaltyPercent;
+  var base = Math.min(streak, 2 * capStreak(cat));
+  return Math.max(0, Math.round(base * (1 - pct / 100)));
+}
+
 /** ISO-8601 week string, e.g. "2026-W26", for a "YYYY-MM-DD" date. */
 function isoWeek(dateStr) {
   var p = dateStr.split('-');
@@ -538,9 +557,7 @@ function applyEntry(state, balance, cat, input) {
     s.freezesUsedThisPeriod = (Number(state.freezesUsedThisPeriod) || 0) + 1;
     freezeUsed = true;
   } else {
-    // No freeze left: the penalty decides how much of the streak survives.
-    var pct = cat.missPenaltyPercent == null ? 100 : cat.missPenaltyPercent;
-    s.streak = Math.max(0, Math.round(state.streak * (1 - pct / 100)));
+    s.streak = penalizedStreak(cat, state.streak);
   }
   s.lastRecordedKey = periodKey;
   var event = {
@@ -679,8 +696,7 @@ function replayCategory(cat, entries, currentPeriodStart) {
       used += 1;
       freezeUsed = true;
     } else {
-      var pct = cat.missPenaltyPercent == null ? 100 : cat.missPenaltyPercent;
-      streak = Math.max(0, Math.round(streak * (1 - pct / 100)));
+      streak = penalizedStreak(cat, streak);
     }
     out.push(Object.assign({}, e, { freezeUsed: freezeUsed, amount: amount }));
   }
@@ -874,7 +890,7 @@ function validateCategory(cat) {
 }
 
 export {
-  round2, payout, isoWeek, periodKeyFor, shiftDays, mondayOf, isoDow,
+  round2, payout, capStreak, penalizedStreak, isoWeek, periodKeyFor, shiftDays, mondayOf, isoDow,
   periodKeyDate, freezePeriodStart, validPeriodKey, claimablePeriodKey,
   choreKeyFitsCadence, repairChoreState, isChoreClaimed, chorePotFor, dailyRunKeys,
   outstandingChorePeriods, nextChorePeriodKey, choreDueDateFor,
