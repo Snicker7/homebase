@@ -344,7 +344,8 @@ export function createService(ctx) {
         id: r.id,
         // Deleting an entry row replays the habit's history, so any own row goes.
         // A card row is undone by re-filing the transaction in the inbox.
-        canDelete: r.type === 'spend' || r.type === 'deposit' || r.type === 'entry' || r.type === 'claim',
+        // A gift received is the giver's to take back, not the receiver's.
+        canDelete: r.type === 'spend' || (r.type === 'deposit' && !isGift(r)) || r.type === 'entry' || r.type === 'claim',
         merchant: r.merchant || '',
         timestamp: formatTimestamp(r.timestamp),
         type: r.type, category: r.category,
@@ -579,6 +580,36 @@ export function createService(ctx) {
     return { ok: true, wallet: netWallet(email, out.balance), event: out.event };
   }
 
+  // A gift is a spend on the giver's wallet and a deposit on the partner's,
+  // tied by one period key so taking the gift back removes both halves.
+  const GIFT_KEY = 'gift:';
+  function isGift(r) { return String(r.periodKey || '').indexOf(GIFT_KEY) === 0; }
+
+  function doGive(p) {
+    const email = requireUser(p);
+    const partner = store.partnerOf(email);
+    if (!partner) return { ok: false, error: 'nobody to give to' };
+    const amount = E.round2(Number(p.amount));
+    if (!(amount > 0)) return { ok: false, error: 'gift amount must be positive' };
+    const rows = store.readLedgerRows();
+    const balance = E.deriveWallet(rows, email);
+    // A spend may run a wallet negative, but a gift may not: going into debt to
+    // fund the other wallet would mint money for the pair of you. Card spending
+    // is money already gone, so the limit is the figure the wallet tile shows.
+    const have = netWallet(email, balance);
+    if (amount > have) {
+      return { ok: false, error: have > 0 ? 'you only have ' + money(have) + ' to give' : 'there is nothing in your wallet to give' };
+    }
+    const note = String(p.note || '').trim();
+    const tail = note ? ': ' + note : '';
+    const key = GIFT_KEY + crypto.randomUUID();
+    const out = E.applySpend(balance, { amount: amount, note: 'Gift to ' + store.displayName(partner) + tail, actor: email });
+    const into = E.applyDeposit(E.deriveWallet(rows, partner), { amount: amount, note: 'Gift from ' + store.displayName(email) + tail, actor: partner });
+    store.appendLedger({ ...out.event, periodKey: key, timestamp: ctx.now() });
+    store.appendLedger({ ...into.event, periodKey: key, timestamp: ctx.now() });
+    return { ok: true, wallet: netWallet(email, out.balance), event: out.event };
+  }
+
   function doDeleteEntry(p) {
     const email = requireUser(p);
     const id = p.id;
@@ -620,6 +651,14 @@ export function createService(ctx) {
     }
     if (match.type !== 'spend' && match.type !== 'deposit') {
       return { ok: false, error: 'that row can\'t be removed here' };
+    }
+    if (isGift(match)) {
+      if (match.type === 'deposit') {
+        return { ok: false, error: 'only ' + store.displayName(store.partnerOf(email)) + ' can take this gift back' };
+      }
+      rows.forEach(function (r) {
+        if (r.type === 'deposit' && r.periodKey === match.periodKey) store.deleteLedgerRow(r.id);
+      });
     }
     store.deleteLedgerRow(match.id);
     return { ok: true, wallet: walletWithout(rows, email, match.id) };
@@ -1078,6 +1117,7 @@ export function createService(ctx) {
       case 'state': return stateResponse(requireUser(p));
       case 'record': return doRecord(p);
       case 'spend': return doSpend(p);
+      case 'give': return doGive(p);
       case 'deleteEntry': return doDeleteEntry(p);
       case 'amend': return doAmend(p);
       case 'catHistory': return doCatHistory(p);

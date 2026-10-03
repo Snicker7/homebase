@@ -142,8 +142,10 @@ function renderStrip(r) {
 
 function renderPartner(p) {
   const card = $('partnerCard');
+  $('giveBlock').hidden = !p;
   if (!p) { card.hidden = true; return; }
   card.hidden = false;
+  $('giveTo').textContent = p.name || 'your partner';
   $('partnerName').textContent = p.name || 'Partner';
   $('partnerWallet').textContent = money(p.wallet);
 }
@@ -407,10 +409,9 @@ function choreCard(c, me) {
   // An anytime chore is never finished, so it keeps its button and tallies the
   // day instead of showing who closed it out.
   const doneToday = Number(c.doneToday) || 0;
-  // A daily chore's missed days roll into today's claim. Only a shared chore
-  // gets that money back; an assigned one just shows what the wait cost.
+  // A daily chore's missed days roll into today's claim, which pays them back.
   const pot = Number(c.pot) || 0;
-  const payout = c.assignee ? c.value : c.value + pot;
+  const payout = c.value + pot;
   const sub = [
     who,
     cadence.toLowerCase(),
@@ -425,12 +426,10 @@ function choreCard(c, me) {
     '<span class="entry-glyph">' + esc(c.emoji || '🧹') + '</span>' +
     '<div class="entry-main"><span class="entry-name">' + esc(c.name) + '</span>' +
     '<span class="entry-sub">' + sub + '</span></div>' +
-    '<span class="worth' + (pot && !c.assignee ? ' pot-on' : '') + '">' + money(payout) + '</span>' +
+    '<span class="worth' + (pot ? ' pot-on' : '') + '">' + money(payout) + '</span>' +
     '</div>' +
     (pot
-      ? '<p class="stake">' + (c.assignee
-        ? '<span class="num">' + money(pot) + '</span> <span class="dim">drained while it waited</span>'
-        : '<span class="num">' + money(c.value) + '</span> <span class="dim">+</span> <span class="num pot">' + money(pot) + '</span> <span class="dim">pot from missed days</span>') + '</p>'
+      ? '<p class="stake"><span class="num">' + money(c.value) + '</span> <span class="dim">+</span> <span class="num pot">' + money(pot) + '</span> <span class="dim">pot from missed days</span></p>'
       : '') +
     (c.claimedBy
       ? '<p class="chore-done">✓ ' + esc(c.claimedBy) + (c.cadence === 'daily' ? ' <span class="dim">today</span>' : '') + '</p>'
@@ -450,12 +449,10 @@ function choreCard(c, me) {
       ? outstanding.map((o) =>
           '<div class="catchup">' +
           '<p class="catchup-text">' + esc(periodLabel(o.periodKey)) + ' is still open' +
-          (c.assignee
-            ? ' <span class="dim">· ' + money(o.pot) + ' drained</span>'
-            : ' <span class="dim">·</span> <span class="num">' + money(c.value + o.pot) + '</span> with the pot') +
+          ' <span class="dim">·</span> <span class="num">' + money(c.value + o.pot) + '</span> with the pot' +
           '. Lost when ' + (c.cadence === 'once' ? 'it is archived' : 'the next one comes due') + '.</p>' +
           '<div class="catch-btns"><button class="ok" data-claim-past="' + esc(o.periodKey) + '">Did it<span class="amt">' +
-          money(c.assignee ? c.value : c.value + o.pot) + '</span></button>' +
+          money(c.value + o.pot) + '</span></button>' +
           (c.assignee ? '' : '<button class="ok-ghost" data-claim-past-together="' + esc(o.periodKey) + '">Together</button>') +
           '</div></div>').join('')
       : '');
@@ -528,8 +525,11 @@ function renderChorePause(wrap, pauseUntil) {
 
 
 /* ── activity feed ──────────────────────────────────────────────────────── */
+// A gift is a spend on one wallet and a deposit on the other, sharing this key.
+function isGift(e) { return String(e.periodKey || '').indexOf('gift:') === 0; }
 function describe(e) {
   const cat = e.categoryName || e.category;
+  if (isGift(e)) return { icon: '💝', text: e.note || 'Gift', sub: '' };
   if (e.type === 'spend') return { icon: '🛒', text: e.note || 'Spent', sub: '' };
   // A card transaction filed to this person's wallet. Undone by re-filing it
   // in the inbox, which is why the row carries no remove button.
@@ -600,7 +600,9 @@ function renderLedger(rows) {
     if (del) del.addEventListener('click', () => {
       if (inFlight) return;
       askInline(item,
-        isEntry ? 'Remove this answer? The night reopens and streaks and payouts recompute.' : 'Remove this entry? Your wallet updates.',
+        isEntry ? 'Remove this answer? The night reopens and streaks and payouts recompute.'
+          : isGift(e) ? 'Take this gift back? Both wallets update.'
+          : 'Remove this entry? Your wallet updates.',
         'Remove', true, (b) => deleteEntry(item, e.id, b));
     });
   });
@@ -954,6 +956,22 @@ function wire() {
       banner(spent < Number(amount)
         ? 'Spent ' + money(spent) + ' — that was everything in the wallet.'
         : 'Spent ' + money(spent) + '.', false);
+      showDashboard(true);
+    } catch (err) { banner(err.message, true); }
+  });
+
+  $('giveForm').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    const amount = $('giveAmount').value, note = $('giveNote').value;
+    banner('Saving…', false);
+    try {
+      const r = await api('give', { amount, note });
+      // The frontend ships before the backend (see README): a deployment that
+      // predates gifts answers ok with no event and has moved nothing.
+      if (!r.ok || !r.event) { banner(r.error || 'Could not give — the backend does not know gifts yet.', true); return; }
+      if (typeof r.wallet === 'number') setWallet(r.wallet);
+      $('giveAmount').value = ''; $('giveNote').value = '';
+      banner('Gave ' + money(r.event.amount) + ' to ' + PARTNER_NAME + '.', false);
       showDashboard(true);
     } catch (err) { banner(err.message, true); }
   });

@@ -921,10 +921,11 @@ test('chorePenaltyAmounts: shared halves, assigned full', () => {
     [{ actor: 'a@x.com', amount: -2 }]);
 });
 
-test('chorePayout: shared collects the pot, assigned only the value', () => {
+test('chorePayout: shared and assigned both collect the pot', () => {
   assert.strictEqual(E.chorePayout(CHORE, 2), 4);
   assert.strictEqual(E.chorePayout(CHORE, 0), 2);
-  assert.strictEqual(E.chorePayout(ACHORE, 2), 2);
+  assert.strictEqual(E.chorePayout(ACHORE, 2), 4);
+  assert.strictEqual(E.chorePayout(ACHORE, 0), 2);
 });
 
 // Weekly due days + pause resume

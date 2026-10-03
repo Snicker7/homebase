@@ -92,6 +92,15 @@
           </form>
         </section>
 
+        <section class="block" id="giveBlock" hidden>
+          <h2 class="block-title">Give to <span id="giveTo">your partner</span></h2>
+          <form id="giveForm" class="row spend">
+            <input id="giveAmount" type="number" min="0.01" step="0.01" placeholder="0.00" inputmode="decimal" required aria-label="Amount" />
+            <input id="giveNote" type="text" placeholder="What for?" />
+            <button type="submit" class="ghost">Give</button>
+          </form>
+        </section>
+
         <section class="block">
           <h2 class="block-title">Activity <span class="hint-inline">your last 20 lines</span></h2>
           <div id="ledger" class="feed"></div>
