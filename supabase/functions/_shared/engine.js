@@ -394,9 +394,13 @@ function chorePenaltyAmounts(cat, allowlist) {
   return allowlist.map(function (a) { return { actor: a, amount: half }; });
 }
 
-/** A claim's worth: shared chores recover the pot, assigned ones never do. */
+/**
+ * A claim's worth: the value plus whatever the wait drained, shared or
+ * assigned. The refund needs no cap of its own — the sweep stops draining a
+ * period at CHORE_ACCRUAL_CAP, so the pot never holds more than that.
+ */
 function chorePayout(cat, pot) {
-  return cat.assignee ? round2(cat.value) : round2(cat.value + pot);
+  return round2(cat.value + pot);
 }
 
 /**

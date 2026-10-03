@@ -331,6 +331,67 @@ test('claim together: refused on an assigned chore', () => {
   assert.match(r.error, /assigned/);
 });
 
+/* ── gifts ─────────────────────────────────────────────────────────────── */
+const funded = (opts) => makeCtx({
+  ledger: [{ id: 'seed', timestamp: '2026-09-07T16:00:00Z', type: 'deposit', amount: 10, balanceAfter: 10, actor: ANN }],
+  ...opts,
+});
+
+test('give: moves money from the giver\'s wallet to the partner\'s', () => {
+  const { ctx, store } = funded();
+  const svc = createService(ctx);
+  const r = svc.route({ action: 'give', user: ANN, amount: 4, note: 'for the movie' });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 6);
+  assert.strictEqual(r.event.amount, 4);
+  const [out, into] = store.readLedgerRows().slice(-2);
+  assert.deepStrictEqual([out.type, out.actor, out.amount, out.balanceAfter, out.note], ['spend', ANN, 4, 6, 'Gift to Bo: for the movie']);
+  assert.deepStrictEqual([into.type, into.actor, into.amount, into.balanceAfter, into.note], ['deposit', BO, 4, 4, 'Gift from Ann: for the movie']);
+  assert.strictEqual(out.periodKey, into.periodKey, 'one key ties the two halves');
+  assert.strictEqual(svc.route({ action: 'state', user: BO }).wallet, 4);
+});
+
+test('give: a blank note still names both sides', () => {
+  const { ctx, store } = funded();
+  createService(ctx).route({ action: 'give', user: ANN, amount: 1 });
+  assert.deepStrictEqual(store.readLedgerRows().slice(-2).map((x) => x.note), ['Gift to Bo', 'Gift from Ann']);
+});
+
+test('give: refused past the balance, and for a non-positive amount', () => {
+  const { ctx, store } = funded();
+  const svc = createService(ctx);
+  assert.match(svc.route({ action: 'give', user: ANN, amount: 10.01 }).error, /only have \$10\.00/);
+  assert.match(svc.route({ action: 'give', user: BO, amount: 1 }).error, /nothing in your wallet/);
+  assert.match(svc.route({ action: 'give', user: ANN, amount: 0 }).error, /positive/);
+  assert.match(svc.route({ action: 'give', user: ANN, amount: 'abc' }).error, /positive/);
+  assert.strictEqual(store.readLedgerRows().length, 1, 'nothing was written');
+  assert.strictEqual(svc.route({ action: 'give', user: ANN, amount: 10 }).wallet, 0, 'the whole balance may go');
+});
+
+test('give: card spending filed to the wallet counts against what can be given', () => {
+  const { ctx } = funded({ walletTxns: [{ id: 't1', actor: ANN, date: '2026-09-07', amount: 7, merchant: 'Cafe' }] });
+  const svc = createService(ctx);
+  assert.match(svc.route({ action: 'give', user: ANN, amount: 4 }).error, /only have \$3\.00/);
+  assert.strictEqual(svc.route({ action: 'give', user: ANN, amount: 3 }).wallet, 0);
+});
+
+test('give: only the giver can take it back, and both halves go together', () => {
+  const { ctx, store } = funded();
+  const svc = createService(ctx);
+  svc.route({ action: 'give', user: ANN, amount: 4 });
+  const got = svc.route({ action: 'state', user: BO }).ledger[0];
+  assert.strictEqual(got.type, 'deposit');
+  assert.strictEqual(got.canDelete, false);
+  assert.match(svc.route({ action: 'deleteEntry', user: BO, id: got.id }).error, /Ann/);
+  const gave = svc.route({ action: 'state', user: ANN }).ledger[0];
+  assert.strictEqual(gave.canDelete, true);
+  const r = svc.route({ action: 'deleteEntry', user: ANN, id: gave.id });
+  assert.strictEqual(r.ok, true);
+  assert.strictEqual(r.wallet, 10);
+  assert.strictEqual(store.readLedgerRows().length, 1, 'both rows are gone');
+  assert.strictEqual(svc.route({ action: 'state', user: BO }).wallet, 0);
+});
+
 /* ── fortnightly chores ────────────────────────────────────────────────── */
 const BINS = { id: 'bins', kind: 'chore', name: 'Bins', emoji: '🗑️', cadence: 'biweekly', value: 4, assignee: '', dueDate: '', dueDay: '', notes: '', reminderTime: '', active: true };
 
@@ -641,6 +702,34 @@ test('daily chore: a joint claim splits value and pot', () => {
   const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes', together: true });
   assert.strictEqual(r.ok, true);
   assert.strictEqual(r.event.amount + r.event.partnerAmount, 8);
+});
+
+test('daily chore: an assigned chore\'s claim pays the drain back too', () => {
+  const { ctx } = makeCtx({
+    categories: [{ ...DISHES, assignee: ANN }],
+    choreStates: [{ category: 'dishes', state: { since: '2026-09-01', sweepFrom: '2026-09-01', chargedThrough: '2026-09-01' } }],
+    nowIso: dayIso('2026-09-02'),
+  });
+  const svc = createService(ctx);
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, -2, 'Sep 1 was missed: the full value drains from the assignee');
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' });
+  assert.strictEqual(r.event.pot, 2);
+  assert.strictEqual(r.event.amount, 4, 'the value plus the drained day');
+  assert.strictEqual(r.wallet, 2);
+  assert.strictEqual(svc.route({ action: 'state', user: BO }).wallet, 0, 'the partner was never part of it');
+});
+
+test('daily chore: an assigned chore\'s refund stops at five drained days', () => {
+  const { ctx } = makeCtx({
+    categories: [{ ...DISHES, assignee: ANN }],
+    choreStates: [{ category: 'dishes', state: { since: '2026-09-01', sweepFrom: '2026-09-01', chargedThrough: '2026-09-01' } }],
+    nowIso: dayIso('2026-09-12'),
+  });
+  const svc = createService(ctx);
+  assert.strictEqual(svc.route({ action: 'state', user: ANN }).wallet, -10, 'eleven missed days, five drains');
+  const r = svc.route({ action: 'claim', user: ANN, categoryId: 'dishes' });
+  assert.strictEqual(r.event.amount, 12, 'the value plus five days back');
+  assert.strictEqual(r.wallet, 2);
 });
 
 test('daily chore: the pot does not survive a pause', () => {
